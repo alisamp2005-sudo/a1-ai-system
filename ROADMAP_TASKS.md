@@ -1,21 +1,21 @@
 # Чеклист задач (Roadmap)
 
 ## Фаза 0: Подготовка инфраструктуры (Недели 1-2)
-- [ ] Закупка Mac Mini M4 Pro 64GB
+- [x] Закупка Mac Mini M4 Pro 64GB
 - [ ] Настройка macOS (отключение сна, автозапуск)
 - [ ] Установка Cloudflare Tunnel, Nginx
 - [ ] Установка Ollama
 - [ ] Загрузка моделей (Qwen 32B, Llama 8B, LLaVA 7B, Whisper)
 - [ ] Тестирование моделей через API
-- [ ] Настройка Docker Compose (PostgreSQL, Redis, ChromaDB)
+- [x] Настройка Docker Compose (PostgreSQL, Redis, ChromaDB) — файл готов
 
 ## Фаза 1: Ядро системы (Недели 3-6)
-- [ ] Инициализация Python проекта (FastAPI)
+- [x] Инициализация Python проекта (FastAPI) — каркас готов
 - [ ] Разработка Telegram-бота (aiogram 3)
 - [ ] Интеграция Whisper для голосовых сообщений
 - [ ] Разработка Router (Диспетчер) на LangGraph
 - [ ] Разработка QA-Контролера
-- [ ] Настройка Celery + Redis
+- [x] Настройка Celery + Redis — конфигурация готова
 - [ ] Разработка SLA-Контролера (логика таймеров и эскалаций)
 
 ## Фаза 2: AI-агенты (Недели 7-11)
