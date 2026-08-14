@@ -66,9 +66,36 @@ class SecretaryAgent:
     def __init__(self, ollama: OllamaClient):
         self.ollama = ollama
 
+    async def process_question(self, question: str) -> str:
+        """
+        Router-compatible entry point: process any project management question.
+        If it looks like a meeting text — generate protocol.
+        Otherwise — answer as project management assistant.
+        """
+        # Check if this is a meeting transcript (long text with dialogue)
+        if len(question) > 500 and any(kw in question.lower() for kw in ["совещани", "протокол", "решили", "поручить"]):
+            return await self.generate_protocol(question)
+
+        # Otherwise — answer as project management assistant
+        prompt = question
+        response = await self.ollama.generate(
+            prompt=prompt,
+            model="llama3.1:8b",
+            system_prompt=(
+                "Ты — помощник руководителя проекта строительной компании А1. "
+                "Помогаешь с контролем сроков, графиков строительства, "
+                "координацией между объектами, информацией о текущих проектах. "
+                "Отвечай кратко и по делу на русском языке. "
+                "Текущие объекты компании: Михалковская, Дмитровская, Южнопортовая, "
+                "Нагатинская, Кунцевская (это тестовые данные, уточни у руководства)."
+            ),
+            temperature=0.4,
+        )
+        return response
+
     async def process_meeting_text(self, text: str) -> str:
         """
-        Main entry point: process meeting text and return formatted protocol.
+        Process meeting text and return formatted protocol.
         """
         # Generate protocol
         protocol = await self.generate_protocol(text)
