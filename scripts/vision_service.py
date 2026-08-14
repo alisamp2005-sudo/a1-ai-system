@@ -108,8 +108,10 @@ async def analyze_image(request: AnalyzeRequest):
             processor,
             formatted_prompt,
             images=[tmp_path],
-            max_tokens=1024,
-            temperature=0.3,
+            max_tokens=512,
+            temperature=0.4,
+            repetition_penalty=1.3,
+            repetition_context_size=100,
         )
 
         # Удаляем временный файл
