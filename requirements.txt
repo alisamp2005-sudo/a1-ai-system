@@ -32,3 +32,4 @@ python-dotenv>=1.0.1
 python-multipart==0.0.9
 tenacity==9.0.0
 pytz==2024.1
+beautifulsoup4==4.12.3
