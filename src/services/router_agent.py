@@ -10,6 +10,7 @@ from typing import Optional
 from src.services.ollama_client import OllamaClient
 from src.services.qa_controller import QAController
 from src.services.memory_service import memory
+from src.services.rag_service import rag_service
 from src.agents.secretary import SecretaryAgent
 from src.agents.lawyer import LawyerAgent
 from src.agents.finance import FinanceAgent
@@ -175,6 +176,20 @@ class RouterAgent:
         # Get conversation history for context
         history_messages = await memory.get_messages_for_chat(user_id)
 
+        # Step 2.5: RAG — search knowledge base for relevant context
+        rag_context = ""
+        try:
+            rag_result = rag_service.search(
+                query=text,
+                agent=task_type if task_type != "general" else None,
+                n_results=3,
+            )
+            if rag_result:
+                rag_context = f"\n\n[БАЗА ЗНАНИЙ (используй эту информацию для ответа):\n{rag_result[:3000]}\n]\n\n"
+                logger.info(f"RAG: найден контекст ({len(rag_result)} символов)")
+        except Exception as e:
+            logger.warning(f"RAG search error: {e}")
+
         agent = self.agents.get(task_type)
         if agent:
             # For agents with process_question — pass context in the question
@@ -182,7 +197,7 @@ class RouterAgent:
             context_prefix = ""
             if context and len(context) > 50:
                 context_prefix = f"[КОНТЕКСТ РАЗГОВОРА:\n{context[-2000:]}\n]\n\n"
-            response = await agent.process_question(context_prefix + text)
+            response = await agent.process_question(context_prefix + rag_context + text)
         else:
             # Fallback: use chat_with_history for full context
             model = "qwen2.5:32b" if needs_complex else "llama3.1:8b"
@@ -193,8 +208,9 @@ class RouterAgent:
             # Add recent history (last 10 messages for context)
             for msg in history_messages[-10:]:
                 messages.append(msg)
-            # Add current message
-            messages.append({"role": "user", "content": text})
+            # Add RAG context + current message
+            user_content = rag_context + text if rag_context else text
+            messages.append({"role": "user", "content": user_content})
 
             response = await self.ollama.chat_with_history(
                 messages=messages,

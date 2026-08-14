@@ -36,8 +36,8 @@ CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8000")
 EMBED_MODEL = "nomic-embed-text"
 COLLECTION_NAME = "a1_knowledge_base"
 DOCS_DIR = Path.home() / "a1-ai-system" / "data" / "rag_documents"
-CHUNK_SIZE = 600  # слов в одном фрагменте
-CHUNK_OVERLAP = 100  # слов перекрытия
+CHUNK_SIZE = 300  # слов в одном фрагменте
+CHUNK_OVERLAP = 50  # слов перекрытия
 
 # ================================================================
 # ИСТОЧНИКИ ДОКУМЕНТОВ
