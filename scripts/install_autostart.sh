@@ -127,12 +127,47 @@ EOF
 
 echo "✅ Cloudflare Tunnel LaunchAgent создан"
 
+# 4. LaunchAgent для Whisper-сервиса
+cat > "$PLIST_DIR/com.a1.whisper-service.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.a1.whisper-service</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>$HOME/a1-ai-system/scripts/whisper_service.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$HOME/a1-ai-system</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/a1-whisper-service.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/a1-whisper-service.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
+EOF
+
+echo "✅ Whisper Service LaunchAgent создан"
+
 # Загружаем все LaunchAgents
 echo ""
 echo "Загрузка LaunchAgents..."
 
 launchctl load "$PLIST_DIR/com.a1.docker-compose.plist" 2>/dev/null || true
 launchctl load "$PLIST_DIR/com.a1.vision-service.plist" 2>/dev/null || true
+launchctl load "$PLIST_DIR/com.a1.whisper-service.plist" 2>/dev/null || true
 launchctl load "$PLIST_DIR/com.a1.cloudflare-tunnel.plist" 2>/dev/null || true
 
 echo ""

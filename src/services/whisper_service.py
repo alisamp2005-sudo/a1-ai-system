@@ -1,37 +1,23 @@
 """
 Whisper Speech-to-Text Service.
-Uses faster-whisper for local transcription of voice messages.
+Calls the host Whisper service (port 11436) for transcription.
+Model runs on Mac host (not inside Docker) for better performance and caching.
 """
 
 import logging
 import os
-import tempfile
 from typing import Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
-# Lazy-load the model (heavy, ~3 GB)
-_model = None
-
-
-def get_whisper_model():
-    """Lazy-load Whisper model on first use."""
-    global _model
-    if _model is None:
-        from faster_whisper import WhisperModel
-        logger.info("Loading Whisper Large v3 model... (first time, may take 30-60 seconds)")
-        _model = WhisperModel(
-            "large-v3",
-            device="cpu",  # On Mac, CPU with Apple Silicon is fast enough
-            compute_type="int8",  # Quantized for speed
-        )
-        logger.info("Whisper model loaded successfully!")
-    return _model
+WHISPER_URL = os.getenv("WHISPER_URL", "http://host.docker.internal:11436")
 
 
 async def transcribe_voice(audio_path: str) -> Optional[str]:
     """
-    Transcribe an audio file to text using Whisper.
+    Transcribe an audio file to text via the host Whisper service.
 
     Args:
         audio_path: Path to the audio file (OGG/MP3/WAV)
@@ -40,34 +26,34 @@ async def transcribe_voice(audio_path: str) -> Optional[str]:
         Transcribed text or None if failed
     """
     try:
-        import asyncio
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            with open(audio_path, "rb") as f:
+                files = {"file": (os.path.basename(audio_path), f, "audio/ogg")}
+                response = await client.post(
+                    f"{WHISPER_URL}/transcribe",
+                    files=files,
+                )
 
-        # Run transcription in a thread pool (it's CPU-bound)
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, _transcribe_sync, audio_path)
-        return result
+            if response.status_code == 200:
+                data = response.json()
+                text = data.get("text", "")
+                duration = data.get("duration", 0)
+                logger.info(f"Transcribed {duration:.1f}s audio -> {len(text)} chars")
+                return text
+            elif response.status_code == 503:
+                logger.warning("Whisper service is still loading model...")
+                return None
+            else:
+                logger.error(f"Whisper service error: {response.status_code} {response.text}")
+                return None
 
+    except httpx.ConnectError:
+        logger.error(
+            "Cannot connect to Whisper service. "
+            "Make sure whisper_service.py is running on the host: "
+            "python3 scripts/whisper_service.py"
+        )
+        return None
     except Exception as e:
         logger.error(f"Whisper transcription error: {e}")
         return None
-
-
-def _transcribe_sync(audio_path: str) -> str:
-    """Synchronous transcription (runs in thread pool)."""
-    model = get_whisper_model()
-
-    segments, info = model.transcribe(
-        audio_path,
-        language="ru",
-        beam_size=5,
-        vad_filter=True,  # Filter out silence
-    )
-
-    # Collect all segments
-    text_parts = []
-    for segment in segments:
-        text_parts.append(segment.text.strip())
-
-    full_text = " ".join(text_parts)
-    logger.info(f"Transcribed {info.duration:.1f}s audio -> {len(full_text)} chars")
-    return full_text
