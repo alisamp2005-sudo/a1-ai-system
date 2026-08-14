@@ -12,6 +12,7 @@ from aiogram.client.default import DefaultBotProperties
 
 from src.bot.handlers import router as handlers_router
 from src.bot.task_handlers import task_router
+from src.bot.approval_handlers import approval_router
 from src.utils.config import settings
 
 logging.basicConfig(
@@ -34,6 +35,7 @@ async def main():
     dp = Dispatcher()
 
     # Register handlers
+    dp.include_router(approval_router)
     dp.include_router(task_router)
     dp.include_router(handlers_router)
 
