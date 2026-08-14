@@ -11,6 +11,7 @@ from aiogram.filters import CommandStart, Command
 
 from src.services.ollama_client import OllamaClient
 from src.services.router_agent import RouterAgent
+from src.services.inline_links import build_inline_keyboard
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -210,7 +211,19 @@ async def handle_text_message(message: Message):
             user_id=user_id,
             user_name=user_name,
         )
-        await message.answer(response, reply_markup=MAIN_MENU)
+
+        # Check for entity links (objects, people) to add inline buttons
+        inline_kb = build_inline_keyboard(response)
+
+        if inline_kb:
+            # Send with reply keyboard + inline buttons below
+            await message.answer(response, reply_markup=MAIN_MENU)
+            await message.answer(
+                "🔗 Подробнее:",
+                reply_markup=inline_kb,
+            )
+        else:
+            await message.answer(response, reply_markup=MAIN_MENU)
 
     except Exception as e:
         logger.error(f"Error processing message: {e}")
