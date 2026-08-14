@@ -26,7 +26,7 @@ app = FastAPI(title="A1 Vision Service", version="1.0")
 # Глобальные переменные для модели
 model = None
 processor = None
-MODEL_NAME = "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit"
+MODEL_NAME = "mlx-community/Llama-3.2-11B-Vision-Instruct-8bit"
 
 
 class AnalyzeRequest(BaseModel):
