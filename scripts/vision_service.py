@@ -78,20 +78,27 @@ async def analyze_image(request: AnalyzeRequest):
             image.save(tmp, format="JPEG")
             tmp_path = tmp.name
 
-        # Промпт для анализа безопасности
+        # Промпт для анализа безопасности (на английском — перевод делает safety agent)
         if request.prompt:
             user_prompt = request.prompt
         else:
             user_prompt = (
-                "You are a construction site safety inspector in Russia. "
-                "Analyze this photo and identify safety violations. "
-                "Check for: hard hats, safety vests, guardrails, scaffolding, harnesses at height, "
-                "site cleanliness, PPE (personal protective equipment). "
-                "\nRespond ONLY in Russian language. Use this exact format:\n\n"
-                "УРОВЕНЬ ОПАСНОСТИ: [ВЫСОКИЙ/СРЕДНИЙ/НИЗКИЙ/НЕТ НАРУШЕНИЙ]\n\n"
-                "НАРУШЕНИЯ:\n- [описание нарушения 1]\n- [описание нарушения 2]\n\n"
-                "РЕКОМЕНДАЦИИ:\n- [что исправить 1]\n- [что исправить 2]\n\n"
-                "Remember: respond ONLY in Russian."
+                "You are a construction site safety inspector. "
+                "Analyze this photo and identify ALL safety violations. "
+                "Check for:\n"
+                "1. Workers without hard hats\n"
+                "2. Workers without safety vests or PPE\n"
+                "3. Missing guardrails or barriers near edges\n"
+                "4. Missing safety harnesses when working at height\n"
+                "5. Improper scaffolding\n"
+                "6. Electrical hazards\n"
+                "7. Housekeeping issues (debris, tripping hazards)\n\n"
+                "For each violation found, state:\n"
+                "- What: specific violation\n"
+                "- Severity: HIGH / MEDIUM / LOW\n\n"
+                "If no violations are found, say 'No safety violations detected.'\n"
+                "If this is not a construction site photo, say so.\n"
+                "Be specific and concise. Do NOT repeat yourself."
             )
 
         # Формируем сообщение для модели

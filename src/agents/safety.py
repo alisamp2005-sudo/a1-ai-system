@@ -1,8 +1,11 @@
 """
 Агент: Безопасность (Vision — анализ фото с объектов)
 
-Использует mlx-vlm (Llama 3.2 Vision 11B) через отдельный сервис на порту 11435.
-Сервис запускается на хосте: python3 scripts/vision_service.py
+Двухшаговый процесс:
+1. mlx-vlm (Llama 3.2 Vision 11B) анализирует фото на АНГЛИЙСКОМ
+2. Ollama (Llama 3.1 8B) переводит результат на РУССКИЙ
+
+Vision-сервис: http://host.docker.internal:11435
 """
 
 import logging
@@ -16,9 +19,28 @@ logger = logging.getLogger(__name__)
 # URL vision-сервиса (mlx-vlm на хосте)
 VISION_SERVICE_URL = "http://host.docker.internal:11435"
 
+TRANSLATE_PROMPT = """Переведи следующий анализ безопасности строительной площадки на русский язык.
+Сохрани структуру. Переведи:
+- HIGH = ВЫСОКАЯ
+- MEDIUM = СРЕДНЯЯ  
+- LOW = НИЗКАЯ
+- "No safety violations detected" = "Нарушений ТБ не обнаружено"
+
+Формат ответа:
+УРОВЕНЬ ОПАСНОСТИ: [ВЫСОКИЙ/СРЕДНИЙ/НИЗКИЙ/НЕТ НАРУШЕНИЙ]
+
+НАРУШЕНИЯ:
+- [описание каждого нарушения]
+
+РЕКОМЕНДАЦИИ:
+- [что нужно исправить]
+
+Текст для перевода:
+{text}"""
+
 
 class SafetyAgent:
-    """Analyzes construction site photos for safety violations via mlx-vlm."""
+    """Analyzes construction site photos: Vision (EN) -> Ollama translate (RU)."""
 
     def __init__(self):
         self.ollama_url = settings.OLLAMA_URL
@@ -26,7 +48,7 @@ class SafetyAgent:
         self.vision_url = VISION_SERVICE_URL
 
     async def analyze_photo(self, image_path: str) -> str:
-        """Analyze a photo via vision service (mlx-vlm on host)."""
+        """Analyze a photo: Vision (English) -> Llama 8B (translate to Russian)."""
         try:
             # Читаем фото и кодируем в base64
             with open(image_path, "rb") as f:
@@ -41,13 +63,10 @@ class SafetyAgent:
                 except Exception:
                     return self._service_unavailable()
 
-                # Отправляем фото на анализ
+                # Шаг 1: Анализ фото на АНГЛИЙСКОМ через Vision
                 resp = await client.post(
                     f"{self.vision_url}/analyze",
-                    json={
-                        "image_base64": image_data,
-                        "prompt": "",  # Используем дефолтный промпт сервиса
-                    },
+                    json={"image_base64": image_data, "prompt": ""},
                     timeout=300.0,
                 )
 
@@ -60,10 +79,27 @@ class SafetyAgent:
                     logger.error(f"Vision analysis failed: {data.get('result')}")
                     return "⚠️ Ошибка при анализе фото. Попробуйте позже."
 
-                result_text = data.get("result", "")
-                logger.info(f"Vision analysis done: {result_text[:100]}...")
+                english_result = data.get("result", "")
+                logger.info(f"Vision analysis (EN): {english_result[:150]}...")
 
-            return self._format_response(result_text)
+                # Шаг 2: Перевод на русский через Ollama (Llama 8B)
+                translate_resp = await client.post(
+                    f"{self.ollama_url}/api/generate",
+                    json={
+                        "model": self.text_model,
+                        "prompt": TRANSLATE_PROMPT.format(text=english_result),
+                        "stream": False,
+                    },
+                    timeout=60.0,
+                )
+
+                if translate_resp.status_code == 200:
+                    russian_result = translate_resp.json().get("response", "")
+                else:
+                    # Если перевод не удался — показываем английский
+                    russian_result = english_result
+
+            return self._format_response(russian_result, english_result)
 
         except httpx.TimeoutException:
             logger.error("Safety analysis timeout (300s)")
@@ -109,23 +145,21 @@ class SafetyAgent:
             "<code>cd ~/a1-ai-system && python3 scripts/vision_service.py</code>"
         )
 
-    def _format_response(self, text: str) -> str:
+    def _format_response(self, russian_text: str, english_text: str) -> str:
         """Format the final response with severity badge."""
-        text_lower = text.lower()
-
-        # Определяем уровень опасности
-        if "высокий" in text_lower or "высокая" in text_lower:
+        # Determine severity from English text (more reliable)
+        severity = "🟡 СРЕДНЯЯ"
+        eng_lower = english_text.lower()
+        if any(w in eng_lower for w in ["high", "no hard hat", "no harness", "fall", "electr"]):
             severity = "🔴 ВЫСОКАЯ"
-        elif "нет нарушений" in text_lower or "не обнаружено" in text_lower:
+        elif "no safety violations" in eng_lower or "no violations" in eng_lower:
             severity = "🟢 НЕТ НАРУШЕНИЙ"
-        elif "низк" in text_lower:
+        elif any(w in eng_lower for w in ["low", "minor", "housekeeping"]):
             severity = "🟡 НИЗКАЯ"
-        else:
-            severity = "🟡 СРЕДНЯЯ"
 
         return (
             f"🦺 <b>АНАЛИЗ БЕЗОПАСНОСТИ</b>\n"
             f"⚠️ Степень: {severity}\n\n"
-            f"{text}\n\n"
+            f"{russian_text}\n\n"
             f"<i>Ответственный: Поляков С.Б.</i>"
         )
