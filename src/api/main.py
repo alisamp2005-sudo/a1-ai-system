@@ -7,6 +7,7 @@ from src.utils.config import settings
 from src.db.session import engine
 from src.db.models import Base
 from src.api.dashboard import dashboard_router
+from src.api.miniapp import miniapp_router
 
 
 @asynccontextmanager
@@ -39,6 +40,7 @@ async def health_check():
 
 
 app.include_router(dashboard_router)
+app.include_router(miniapp_router)
 
 
 @app.get("/")
