@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from src.utils.config import settings
 from src.db.session import engine
 from src.db.models import Base
+from src.api.dashboard import dashboard_router
 
 
 @asynccontextmanager
@@ -37,10 +38,14 @@ async def health_check():
     }
 
 
+app.include_router(dashboard_router)
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
     return {
         "message": "A1 AI System is running",
         "docs": "/docs",
+        "dashboard": "/dashboard",
     }
