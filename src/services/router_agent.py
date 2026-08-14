@@ -11,6 +11,7 @@ from src.services.ollama_client import OllamaClient
 from src.services.qa_controller import QAController
 from src.services.memory_service import memory
 from src.services.rag_service import rag_service
+from src.services.db_context import db_context
 from src.agents.secretary import SecretaryAgent
 from src.agents.lawyer import LawyerAgent
 from src.agents.finance import FinanceAgent
@@ -210,6 +211,21 @@ class RouterAgent:
         except Exception as e:
             logger.warning(f"RAG search error: {e}")
 
+        # Step 2.6: DB Context — fetch real data from PostgreSQL
+        db_info = ""
+        try:
+            if task_type == "project_management":
+                # Try to find specific project mentioned in the message
+                projects_data = await db_context.get_projects_context()
+                if projects_data:
+                    db_info = f"\n\n[ДАННЫЕ ИЗ БАЗЫ (это РЕАЛЬНЫЕ данные компании, используй их):\n{projects_data}\n]\n\n"
+            elif task_type == "hr":
+                users_data = await db_context.get_users_context()
+                if users_data:
+                    db_info = f"\n\n[ДАННЫЕ ИЗ БАЗЫ:\n{users_data}\n]\n\n"
+        except Exception as e:
+            logger.warning(f"DB context error: {e}")
+
         agent = self.agents.get(task_type)
         if agent:
             # For agents with process_question — pass context in the question
@@ -217,7 +233,7 @@ class RouterAgent:
             context_prefix = ""
             if context and len(context) > 50:
                 context_prefix = f"[КОНТЕКСТ РАЗГОВОРА:\n{context[-2000:]}\n]\n\n"
-            response = await agent.process_question(context_prefix + rag_context + text)
+            response = await agent.process_question(context_prefix + db_info + rag_context + text)
         else:
             # Fallback: use chat_with_history for full context
             model = "qwen2.5:32b" if needs_complex else "llama3.1:8b"
@@ -228,8 +244,8 @@ class RouterAgent:
             # Add recent history (last 10 messages for context)
             for msg in history_messages[-10:]:
                 messages.append(msg)
-            # Add RAG context + current message
-            user_content = rag_context + text if rag_context else text
+            # Add DB + RAG context + current message
+            user_content = db_info + rag_context + text if (db_info or rag_context) else text
             messages.append({"role": "user", "content": user_content})
 
             response = await self.ollama.chat_with_history(
