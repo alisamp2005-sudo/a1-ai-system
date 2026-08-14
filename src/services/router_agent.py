@@ -8,6 +8,7 @@ import json
 from typing import Optional
 
 from src.services.ollama_client import OllamaClient
+from src.services.qa_controller import QAController
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ class RouterAgent:
 
     def __init__(self, ollama: OllamaClient):
         self.ollama = ollama
+        self.qa = QAController(ollama)
 
     async def classify_message(self, text: str) -> dict:
         """
@@ -153,7 +155,36 @@ class RouterAgent:
             temperature=0.4,
         )
 
-        # Step 5: Add classification header (for debugging, can be removed later)
-        header = f"<i>[{task_type.upper()} | {classification.get('priority', 'P3')} | {model.split(':')[0]}]</i>\n\n"
+        # Step 5: QA Controller — validate response
+        approved, reason = await self.qa.validate_response(
+            user_question=text,
+            agent_response=response,
+            task_type=task_type,
+        )
 
-        return header + response
+        if not approved:
+            # Response rejected by QA — return safe fallback
+            logger.warning(f"QA rejected response for '{task_type}': {reason}")
+            return (
+                "⚠️ Система не уверена в точности ответа по вашему вопросу. "
+                "Рекомендуем обратиться к специалисту напрямую."
+            )
+
+        # Step 6: Build final response
+        type_names = {
+            "safety": "Безопасность",
+            "procurement": "Снабжение",
+            "hr": "Кадры",
+            "finance": "Финансы",
+            "legal": "Юридический",
+            "project_management": "Управление проектом",
+            "reporting": "Отчетность",
+            "general": "Общий вопрос",
+        }
+        type_ru = type_names.get(task_type, task_type)
+        header = f"<i>[{type_ru} | {classification.get('priority', 'P3')}]</i>\n\n"
+
+        # Add disclaimer if QA had concerns
+        disclaimer = self.qa.get_disclaimer(reason) if reason else ""
+
+        return header + response + disclaimer
