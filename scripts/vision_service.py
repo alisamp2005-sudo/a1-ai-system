@@ -83,15 +83,15 @@ async def analyze_image(request: AnalyzeRequest):
             user_prompt = request.prompt
         else:
             user_prompt = (
-                "Ты инспектор по технике безопасности на строительной площадке в России. "
-                "Внимательно проанализируй это фото и определи нарушения техники безопасности. "
-                "Обрати внимание на: каски, жилеты, ограждения, леса, страховку на высоте, "
-                "состояние территории, средства индивидуальной защиты. "
-                "Ответь на русском языке. Формат ответа:\n"
-                "УРОВЕНЬ ОПАСНОСТИ: ВЫСОКИЙ/СРЕДНИЙ/НИЗКИЙ/НЕТ НАРУШЕНИЙ\n"
-                "НАРУШЕНИЯ:\n- перечисли каждое нарушение\n"
-                "РЕКОМЕНДАЦИИ:\n- что нужно исправить\n"
-                "ОТВЕТСТВЕННЫЙ: кто должен устранить"
+                "You are a construction site safety inspector in Russia. "
+                "Analyze this photo and identify safety violations. "
+                "Check for: hard hats, safety vests, guardrails, scaffolding, harnesses at height, "
+                "site cleanliness, PPE (personal protective equipment). "
+                "\nRespond ONLY in Russian language. Use this exact format:\n\n"
+                "УРОВЕНЬ ОПАСНОСТИ: [ВЫСОКИЙ/СРЕДНИЙ/НИЗКИЙ/НЕТ НАРУШЕНИЙ]\n\n"
+                "НАРУШЕНИЯ:\n- [описание нарушения 1]\n- [описание нарушения 2]\n\n"
+                "РЕКОМЕНДАЦИИ:\n- [что исправить 1]\n- [что исправить 2]\n\n"
+                "Remember: respond ONLY in Russian."
             )
 
         # Формируем сообщение для модели
