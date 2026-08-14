@@ -265,17 +265,20 @@ async def get_dashboard():
         <tr><td>Рязанский проспект</td><td>г. Москва, Рязанский проспект</td><td><span class="badge badge-green">Активен</span></td></tr>
     """
 
-    html = DASHBOARD_HTML.format(
-        total_tasks=3,
-        done_tasks=0,
-        active_tasks=2,
-        overdue_tasks=0,
-        active_projects=5,
-        total_users=5,
-        today_requests=12,
-        ai_models=3,
-        tasks_rows=tasks_rows,
-        projects_rows=projects_rows,
-    )
+    html = DASHBOARD_HTML
+    replacements = {
+        "{total_tasks}": "3",
+        "{done_tasks}": "0",
+        "{active_tasks}": "2",
+        "{overdue_tasks}": "0",
+        "{active_projects}": "5",
+        "{total_users}": "5",
+        "{today_requests}": "12",
+        "{ai_models}": "3",
+        "{tasks_rows}": tasks_rows,
+        "{projects_rows}": projects_rows,
+    }
+    for key, value in replacements.items():
+        html = html.replace(key, value)
 
     return HTMLResponse(content=html)
