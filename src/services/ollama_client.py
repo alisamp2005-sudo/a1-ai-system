@@ -73,6 +73,52 @@ class OllamaClient:
             logger.error(f"Ollama error: {e}")
             return "⚠️ Не удалось получить ответ от AI-модели."
 
+    async def chat_with_history(
+        self,
+        messages: list,
+        model: str = "llama3.1:8b",
+        temperature: float = 0.3,
+    ) -> str:
+        """
+        Generate a response with full message history.
+
+        Args:
+            messages: List of {"role": "system"/"user"/"assistant", "content": "..."}
+            model: Model name
+            temperature: Creativity
+
+        Returns:
+            Generated text response
+        """
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+            },
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/chat",
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["message"]["content"]
+
+        except httpx.TimeoutException:
+            logger.error(f"Ollama timeout (model={model})")
+            return "⚠️ Модель не ответила вовремя. Попробуйте позже."
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Ollama HTTP error: {e.response.status_code}")
+            return "⚠️ Ошибка подключения к AI-модели."
+        except Exception as e:
+            logger.error(f"Ollama error: {e}")
+            return "⚠️ Не удалось получить ответ от AI-модели."
+
     async def health_check(self) -> bool:
         """Check if Ollama is running."""
         try:

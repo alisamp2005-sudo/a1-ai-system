@@ -9,6 +9,7 @@ from typing import Optional
 
 from src.services.ollama_client import OllamaClient
 from src.services.qa_controller import QAController
+from src.services.memory_service import memory
 from src.agents.secretary import SecretaryAgent
 from src.agents.lawyer import LawyerAgent
 from src.agents.finance import FinanceAgent
@@ -147,6 +148,7 @@ class RouterAgent:
     ) -> str:
         """
         Process a message: classify it, then route to the appropriate agent.
+        Includes conversation memory for context.
 
         Args:
             text: User's message text
@@ -156,28 +158,47 @@ class RouterAgent:
         Returns:
             Agent's response text
         """
+        # Save user message to memory
+        await memory.add_message(user_id, "user", text)
+
         # Step 1: Classify the message
         classification = await self.classify_message(text)
         task_type = classification.get("task_type", "general")
         needs_complex = classification.get("needs_complex_model", False)
 
-        # Step 2: Route to specialized agent
+        # Step 2: Route to specialized agent with context
         logger.info(
             f"Routing to '{task_type}' agent "
             f"(priority={classification.get('priority', 'P3')})"
         )
 
+        # Get conversation history for context
+        history_messages = await memory.get_messages_for_chat(user_id)
+
         agent = self.agents.get(task_type)
         if agent:
-            response = await agent.process_question(text)
+            # For agents with process_question — pass context in the question
+            context = await memory.get_context(user_id)
+            context_prefix = ""
+            if context and len(context) > 50:
+                context_prefix = f"[КОНТЕКСТ РАЗГОВОРА:\n{context[-2000:]}\n]\n\n"
+            response = await agent.process_question(context_prefix + text)
         else:
-            # Fallback to generic prompt if agent not available
+            # Fallback: use chat_with_history for full context
             model = "qwen2.5:32b" if needs_complex else "llama3.1:8b"
             system_prompt = AGENT_PROMPTS.get(task_type, AGENT_PROMPTS["general"])
-            response = await self.ollama.generate(
-                prompt=text,
+
+            # Build messages with history
+            messages = [{"role": "system", "content": system_prompt}]
+            # Add recent history (last 10 messages for context)
+            for msg in history_messages[-10:]:
+                messages.append(msg)
+            # Add current message
+            messages.append({"role": "user", "content": text})
+
+            response = await self.ollama.chat_with_history(
+                messages=messages,
                 model=model,
-                system_prompt=system_prompt,
                 temperature=0.4,
             )
 
@@ -212,5 +233,8 @@ class RouterAgent:
 
         # Add disclaimer if QA had concerns
         disclaimer = self.qa.get_disclaimer(reason) if reason else ""
+
+        # Save assistant response to memory
+        await memory.add_message(user_id, "assistant", response[:500])
 
         return header + response + disclaimer
