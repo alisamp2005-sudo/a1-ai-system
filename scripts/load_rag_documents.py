@@ -36,8 +36,8 @@ CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8000")
 EMBED_MODEL = "nomic-embed-text"
 COLLECTION_NAME = "a1_knowledge_base"
 DOCS_DIR = Path.home() / "a1-ai-system" / "data" / "rag_documents"
-CHUNK_SIZE = 300  # слов в одном фрагменте
-CHUNK_OVERLAP = 50  # слов перекрытия
+CHUNK_SIZE = 200  # слов в одном фрагменте (nomic-embed-text лимит ~2048 токенов)
+CHUNK_OVERLAP = 30  # слов перекрытия
 
 # ================================================================
 # ИСТОЧНИКИ ДОКУМЕНТОВ
@@ -470,10 +470,13 @@ def check_services():
 
 
 def get_embedding(text: str) -> List[float]:
-    """Get embedding vector from Ollama."""
+    """Get embedding vector from Ollama. Truncates text to fit context window."""
+    # nomic-embed-text has ~2048 token limit, ~4 chars per token on average
+    # Truncate to 6000 chars to be safe
+    truncated = text[:6000] if len(text) > 6000 else text
     resp = requests.post(
         f"{OLLAMA_URL}/api/embeddings",
-        json={"model": EMBED_MODEL, "prompt": text},
+        json={"model": EMBED_MODEL, "prompt": truncated},
         timeout=30,
     )
     if resp.status_code == 200:
