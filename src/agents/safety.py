@@ -17,18 +17,19 @@ from src.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
-SAFETY_SYSTEM_PROMPT = """Ты — AI-инспектор по технике безопасности на строительном объекте.
+SAFETY_SYSTEM_PROMPT = """You are an AI safety inspector for a construction site.
 
-Проанализируй фотографию и определи:
-1. Есть ли нарушения техники безопасности
-2. Тип нарушения (отсутствие каски, СИЗ, ограждения, страховки и т.д.)
-3. Степень опасности: ВЫСОКАЯ / СРЕДНЯЯ / НИЗКАЯ
-4. Рекомендации по устранению
+Analyze the photo and determine:
+1. Are there any safety violations?
+2. Type of violation (missing hard hat, missing PPE, no guardrails, no harness, etc.)
+3. Severity: HIGH / MEDIUM / LOW
+4. Recommendations to fix
 
-Правила:
-- Если на фото нет людей или строительной площадки — скажи об этом
-- Если не уверен — укажи "требуется проверка на месте"
-- Будь конкретен: "рабочий без каски у края перекрытия" лучше, чем "нарушение ТБ"
+Rules:
+- If there are no people or no construction site in the photo, say so
+- If unsure, say "on-site inspection required"
+- Be specific: "worker without hard hat near edge of slab" is better than "safety violation"
+- Respond in Russian language
 """
 
 
@@ -37,18 +38,19 @@ class SafetyAgent:
 
     def __init__(self):
         self.ollama_url = settings.OLLAMA_URL
-        self.model = "llava:7b"
-        self.enabled = False  # Set to True after llava:7b is downloaded
+        self.model = "llama3.2-vision:11b"
+        self.enabled = False
 
     async def check_model_available(self) -> bool:
-        """Check if LLaVA model is available in Ollama."""
+        """Check if vision model is available in Ollama."""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{self.ollama_url}/api/tags")
                 if resp.status_code == 200:
                     models = resp.json().get("models", [])
                     for m in models:
-                        if "llava" in m.get("name", "").lower():
+                        if "llama3.2-vision" in m.get("name", "").lower() or "llava" in m.get("name", "").lower():
+                            self.model = m.get("name", self.model)
                             self.enabled = True
                             return True
             return False
@@ -70,9 +72,9 @@ class SafetyAgent:
             if not available:
                 return (
                     "🦺 <b>Агент безопасности</b>\n\n"
-                    "⚠️ Vision-модель (LLaVA) не загружена. "
+                    "⚠️ Vision-модель не загружена. "
                     "Для анализа фото выполните на сервере:\n"
-                    "<code>ollama pull llava:7b</code>"
+                    "<code>ollama pull llama3.2-vision:11b</code>"
                 )
 
         try:
