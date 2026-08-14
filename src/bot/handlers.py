@@ -166,9 +166,55 @@ async def handle_text_message(message: Message):
 
 @router.message(F.voice)
 async def handle_voice_message(message: Message):
-    """Handle voice messages — transcribe and process."""
-    await message.answer(
-        "🎤 Голосовые сообщения будут поддержаны в следующем обновлении. "
-        "Пока, пожалуйста, напишите текстом.",
-        reply_markup=MAIN_MENU,
-    )
+    """Handle voice messages — transcribe with Whisper and process."""
+    import tempfile
+    import os
+    from src.services.whisper_service import transcribe_voice
+
+    await message.answer("🎤 Распознаю голосовое сообщение...", reply_markup=MAIN_MENU)
+
+    try:
+        # Download voice file from Telegram
+        voice = message.voice
+        file = await message.bot.get_file(voice.file_id)
+
+        # Save to temp file
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            tmp_path = tmp.name
+            await message.bot.download_file(file.file_path, tmp_path)
+
+        # Transcribe with Whisper
+        text = await transcribe_voice(tmp_path)
+
+        # Clean up temp file
+        os.unlink(tmp_path)
+
+        if not text or len(text.strip()) < 2:
+            await message.answer(
+                "⚠️ Не удалось распознать речь. Попробуйте записать сообщение ещё раз.",
+                reply_markup=MAIN_MENU,
+            )
+            return
+
+        # Show transcription
+        await message.answer(
+            f"📝 <b>Распознано:</b>\n<i>{text}</i>\n\n⏳ Обрабатываю...",
+            reply_markup=MAIN_MENU,
+        )
+
+        # Process transcribed text through Router (same as text messages)
+        await message.bot.send_chat_action(message.chat.id, "typing")
+
+        response = await router_agent.process_message(
+            text=text,
+            user_id=str(message.from_user.id),
+            user_name=message.from_user.full_name,
+        )
+        await message.answer(response, reply_markup=MAIN_MENU)
+
+    except Exception as e:
+        logger.error(f"Voice message error: {e}")
+        await message.answer(
+            "⚠️ Ошибка при обработке голосового сообщения. Попробуйте текстом.",
+            reply_markup=MAIN_MENU,
+        )
