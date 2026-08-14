@@ -9,6 +9,13 @@ from typing import Optional
 
 from src.services.ollama_client import OllamaClient
 from src.services.qa_controller import QAController
+from src.agents.secretary import SecretaryAgent
+from src.agents.lawyer import LawyerAgent
+from src.agents.finance import FinanceAgent
+from src.agents.procurement import ProcurementAgent
+from src.agents.hr import HRAgent
+from src.agents.analyst import AnalystAgent
+from src.agents.reporter import ReporterAgent
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +87,17 @@ class RouterAgent:
     def __init__(self, ollama: OllamaClient):
         self.ollama = ollama
         self.qa = QAController(ollama)
+        # Specialized agents
+        self.agents = {
+            "safety": None,  # TODO: Safety/Vision agent (Phase 3)
+            "procurement": ProcurementAgent(ollama),
+            "hr": HRAgent(ollama),
+            "finance": FinanceAgent(ollama),
+            "legal": LawyerAgent(ollama),
+            "project_management": SecretaryAgent(ollama),
+            "reporting": ReporterAgent(ollama),
+            "general": AnalystAgent(ollama),
+        }
 
     async def classify_message(self, text: str) -> dict:
         """
@@ -136,24 +154,25 @@ class RouterAgent:
         task_type = classification.get("task_type", "general")
         needs_complex = classification.get("needs_complex_model", False)
 
-        # Step 2: Select model based on complexity
-        model = "qwen2.5:32b" if needs_complex else "llama3.1:8b"
-
-        # Step 3: Get the appropriate system prompt
-        system_prompt = AGENT_PROMPTS.get(task_type, AGENT_PROMPTS["general"])
-
-        # Step 4: Generate response from the selected agent
+        # Step 2: Route to specialized agent
         logger.info(
-            f"Routing to '{task_type}' agent (model={model}, "
-            f"priority={classification.get('priority', 'P3')})"
+            f"Routing to '{task_type}' agent "
+            f"(priority={classification.get('priority', 'P3')})"
         )
 
-        response = await self.ollama.generate(
-            prompt=text,
-            model=model,
-            system_prompt=system_prompt,
-            temperature=0.4,
-        )
+        agent = self.agents.get(task_type)
+        if agent:
+            response = await agent.process_question(text)
+        else:
+            # Fallback to generic prompt if agent not available
+            model = "qwen2.5:32b" if needs_complex else "llama3.1:8b"
+            system_prompt = AGENT_PROMPTS.get(task_type, AGENT_PROMPTS["general"])
+            response = await self.ollama.generate(
+                prompt=text,
+                model=model,
+                system_prompt=system_prompt,
+                temperature=0.4,
+            )
 
         # Step 5: QA Controller — validate response
         approved, reason = await self.qa.validate_response(
