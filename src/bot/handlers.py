@@ -6,7 +6,7 @@ Uses persistent Reply Keyboard for navigation.
 
 import logging
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from aiogram.filters import CommandStart, Command
 
 from src.services.ollama_client import OllamaClient
@@ -30,7 +30,13 @@ MAIN_MENU = ReplyKeyboardMarkup(
             KeyboardButton(text="📋 Мои задачи"),
         ],
         [
+            KeyboardButton(
+                text="📋 Отчет с объекта",
+                web_app=WebAppInfo(url="https://ai.bruceli.ru/miniapp/report")
+            ),
             KeyboardButton(text="📊 Статус системы"),
+        ],
+        [
             KeyboardButton(text="❓ Помощь"),
         ],
     ],
@@ -216,5 +222,41 @@ async def handle_voice_message(message: Message):
         logger.error(f"Voice message error: {e}")
         await message.answer(
             "⚠️ Ошибка при обработке голосового сообщения. Попробуйте текстом.",
+            reply_markup=MAIN_MENU,
+        )
+
+
+@router.message(F.photo)
+async def handle_photo_message(message: Message):
+    """Handle photo messages — analyze for safety violations using LLaVA."""
+    import tempfile
+    import os
+    from src.agents.safety import SafetyAgent
+
+    await message.answer("🦺 Анализирую фото на нарушения ТБ...", reply_markup=MAIN_MENU)
+
+    try:
+        # Get the largest photo
+        photo = message.photo[-1]
+        file = await message.bot.get_file(photo.file_id)
+
+        # Save to temp file
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
+            await message.bot.download_file(file.file_path, tmp_path)
+
+        # Analyze with Vision agent
+        safety = SafetyAgent()
+        result = await safety.analyze_photo(tmp_path)
+
+        # Clean up
+        os.unlink(tmp_path)
+
+        await message.answer(result, reply_markup=MAIN_MENU)
+
+    except Exception as e:
+        logger.error(f"Photo analysis error: {e}")
+        await message.answer(
+            "⚠️ Ошибка при анализе фото. Попробуйте позже.",
             reply_markup=MAIN_MENU,
         )

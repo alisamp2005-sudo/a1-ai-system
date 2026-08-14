@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Telegram
     TELEGRAM_TOKEN: str = ""
+    ADMIN_TELEGRAM_ID: str = "5867249984"
 
     # ChromaDB
     CHROMA_URL: str = "http://chromadb:8000"

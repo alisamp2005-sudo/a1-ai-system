@@ -21,11 +21,15 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
 )
 
-# Beat schedule: check SLA every minute
+# Beat schedule
 celery_app.conf.beat_schedule = {
     "check-sla-every-minute": {
         "task": "src.tasks.sla_checker.check_sla_checkpoints",
         "schedule": settings.SLA_CHECK_INTERVAL_SECONDS,
+    },
+    "morning-digest-08-00": {
+        "task": "src.tasks.digest.send_morning_digest",
+        "schedule": crontab(hour=8, minute=0),  # 08:00 Moscow time
     },
 }
 
