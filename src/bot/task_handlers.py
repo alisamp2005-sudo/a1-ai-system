@@ -144,3 +144,163 @@ async def cmd_mytasks(message: Message):
         "<i>База данных пользователей ещё не заполнена. "
         "Эта функция заработает после импорта сотрудников.</i>"
     )
+
+
+# ================================================================
+# /digest — Get digest on demand
+# ================================================================
+
+@task_router.message(Command("digest"))
+async def cmd_digest(message: Message):
+    """Send digest on demand (same as morning digest)."""
+    from datetime import datetime
+    import pytz
+
+    tz = pytz.timezone("Europe/Moscow")
+    now = datetime.now(tz)
+    date_str = now.strftime("%d.%m.%Y (%A)")
+
+    # TODO: Pull real data from DB
+    digest_text = (
+        f"📊 <b>ДАЙДЖЕСТ — А1</b>\n"
+        f"<i>{date_str}</i>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔴 <b>Критичное:</b>\n"
+        f"Нет критичных событий ✅\n\n"
+        f"📋 <b>Задачи:</b>\n"
+        f"• Всего активных: 0\n"
+        f"• Просрочено: 0\n"
+        f"• Создано сегодня: 0\n"
+        f"• Закрыто сегодня: 0\n\n"
+        f"🏗 <b>Объекты:</b>\n"
+        f"• Активных: 5\n"
+        f"• С проблемами: 0\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<i>Подробнее: https://ai.bruceli.ru/dashboard</i>"
+    )
+
+    await message.answer(digest_text)
+
+
+# ================================================================
+# /users — Admin: manage users
+# ================================================================
+
+@task_router.message(Command("users"))
+async def cmd_users(message: Message):
+    """Show users list with management buttons (admin only)."""
+    # TODO: Check if user is admin
+
+    users_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить пользователя", callback_data="users_add")],
+        [InlineKeyboardButton(text="📋 Список пользователей", callback_data="users_list")],
+        [InlineKeyboardButton(text="🔄 Обновить TG ID", callback_data="users_update_tg")],
+    ])
+
+    await message.answer(
+        "👥 <b>Управление пользователями</b>\n\n"
+        "Текущие пользователи в системе:\n\n"
+        "1. Алимов З.Т. — <i>ГД</i>\n"
+        "2. Зиновьева А. — <i>Исп. директор</i>\n"
+        "3. Лыков М.А. — <i>Зам. директора</i>\n"
+        "4. Поляков С.Б. — <i>ТБ</i>\n"
+        "5. Администратор — <i>admin</i>\n\n"
+        "Выберите действие:",
+        reply_markup=users_keyboard,
+    )
+
+
+@task_router.callback_query(F.data == "users_add")
+async def handle_users_add(callback: CallbackQuery, state: FSMContext):
+    """Start adding a new user."""
+    await state.set_state(AddUserStates.waiting_for_name)
+    await callback.message.edit_text(
+        "👤 <b>Добавление пользователя</b>\n\n"
+        "Введите ФИО нового пользователя:"
+    )
+    await callback.answer()
+
+
+@task_router.callback_query(F.data == "users_list")
+async def handle_users_list(callback: CallbackQuery):
+    """Show full users list."""
+    await callback.message.edit_text(
+        "👥 <b>Все пользователи:</b>\n\n"
+        "1. 👑 Алимов З.Т. — ГД — TG: не привязан\n"
+        "2. 👑 Зиновьева А. — Исп. директор — TG: не привязан\n"
+        "3. 👑 Лыков М.А. — Зам. директора — TG: не привязан\n"
+        "4. 👔 Поляков С.Б. — Служба ТБ — TG: не привязан\n"
+        "5. ⚙️ Администратор — admin — TG: 5867249984\n\n"
+        "<i>Для привязки TG ID попросите сотрудника написать боту /start</i>"
+    )
+    await callback.answer()
+
+
+@task_router.callback_query(F.data == "users_update_tg")
+async def handle_users_update_tg(callback: CallbackQuery):
+    """Explain how to update Telegram IDs."""
+    await callback.message.edit_text(
+        "🔄 <b>Привязка Telegram ID</b>\n\n"
+        "Чтобы привязать Telegram к сотруднику:\n\n"
+        "1. Сотрудник пишет боту <code>/start</code>\n"
+        "2. Бот автоматически запоминает его TG ID\n"
+        "3. Вы связываете TG ID с ФИО через <code>/link</code>\n\n"
+        "Или вручную: узнайте TG ID через @userinfobot и введите:\n"
+        "<code>/link ФИО TELEGRAM_ID</code>\n\n"
+        "Пример: <code>/link Алимов З.Т. 123456789</code>"
+    )
+    await callback.answer()
+
+
+# ================================================================
+# FSM for adding users
+# ================================================================
+
+class AddUserStates(StatesGroup):
+    """FSM states for adding a user."""
+    waiting_for_name = State()
+    waiting_for_role = State()
+
+
+@task_router.message(AddUserStates.waiting_for_name)
+async def process_user_name(message: Message, state: FSMContext):
+    """Process new user's name."""
+    await state.update_data(name=message.text)
+
+    role_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👷 Рабочий", callback_data="role_worker")],
+        [InlineKeyboardButton(text="👔 Руководитель", callback_data="role_manager")],
+        [InlineKeyboardButton(text="👑 ТОП-менеджмент", callback_data="role_top_manager")],
+    ])
+
+    await message.answer(
+        f"👤 Добавляем: <b>{message.text}</b>\n\n"
+        "Выберите роль:",
+        reply_markup=role_keyboard,
+    )
+    await state.set_state(AddUserStates.waiting_for_role)
+
+
+@task_router.callback_query(F.data.startswith("role_"))
+async def process_user_role(callback: CallbackQuery, state: FSMContext):
+    """Process new user's role."""
+    role = callback.data.replace("role_", "")
+    data = await state.get_data()
+    name = data.get("name", "")
+
+    role_names = {
+        "worker": "👷 Рабочий",
+        "manager": "👔 Руководитель",
+        "top_manager": "👑 ТОП-менеджмент",
+    }
+
+    # TODO: Actually save to DB
+    await callback.message.edit_text(
+        f"✅ <b>Пользователь добавлен!</b>\n\n"
+        f"👤 ФИО: {name}\n"
+        f"🏷 Роль: {role_names.get(role, role)}\n"
+        f"📱 TG ID: не привязан\n\n"
+        f"<i>Попросите сотрудника написать боту /start для привязки.</i>"
+    )
+    await callback.answer("Пользователь добавлен!")
+    await state.clear()

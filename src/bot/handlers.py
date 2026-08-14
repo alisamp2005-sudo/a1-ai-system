@@ -94,6 +94,57 @@ async def btn_mytasks(message: Message):
     )
 
 
+@router.message(F.web_app_data)
+async def handle_webapp_data(message: Message):
+    """Handle data received from Mini App (daily report form)."""
+    import json
+
+    try:
+        data = json.loads(message.web_app_data.data)
+        project = data.get("project", "Не указан")
+        work_done = data.get("work_done", "")
+        workers_total = (
+            int(data.get("workers_itr", 0)) +
+            int(data.get("workers_labor", 0)) +
+            int(data.get("workers_sub", 0))
+        )
+        problems = data.get("problems", "Нет")
+        needs = data.get("needs", "Нет")
+        safety_ok = (
+            data.get("safety_briefing", False) and
+            data.get("safety_ppe", False) and
+            data.get("safety_incidents", False)
+        )
+
+        report_text = (
+            f"📋 <b>ОТЧЕТ С ОБЪЕКТА</b>\n\n"
+            f"🏗 Объект: <b>{project}</b>\n"
+            f"📅 Дата: {data.get('report_date', 'Не указана')}\n"
+            f"👷 Персонал: {workers_total} чел.\n"
+            f"🌤 Погода: {data.get('weather_temp', '?')}°C\n\n"
+            f"<b>Выполнено:</b>\n{work_done[:500]}\n\n"
+            f"<b>Проблемы:</b> {problems if problems else 'Нет'}\n\n"
+            f"<b>Потребности:</b> {needs if needs else 'Нет'}\n\n"
+            f"🦺 ТБ: {'✅ Всё в порядке' if safety_ok else '⚠️ Есть замечания'}\n\n"
+            f"<i>Отправил: {message.from_user.full_name}</i>"
+        )
+
+        await message.answer(
+            f"✅ Отчет принят!\n\n{report_text}",
+            reply_markup=MAIN_MENU,
+        )
+
+        # TODO: Save to DB and notify manager
+        logger.info(f"Report received from {message.from_user.full_name} for {project}")
+
+    except Exception as e:
+        logger.error(f"Error processing webapp data: {e}")
+        await message.answer(
+            "⚠️ Ошибка при обработке отчета. Попробуйте ещё раз.",
+            reply_markup=MAIN_MENU,
+        )
+
+
 @router.message(F.text == "📊 Статус системы")
 async def btn_status(message: Message):
     """Handle 'Статус системы' button."""
