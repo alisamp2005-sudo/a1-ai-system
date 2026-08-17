@@ -356,6 +356,99 @@ async def api_get_rag_documents(request: Request):
     return {"documents": []}
 
 
+@admin_router.post("/api/upload-document")
+async def api_upload_document(request: Request):
+    """Upload a document to RAG from admin panel."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    import os
+    import json as json_lib
+    import tempfile
+    import hashlib
+    from src.services.document_processor import extract_text
+    from src.services.rag_service import rag_service
+
+    form = await request.form()
+    file = form.get("file")
+    category = form.get("category", "other")
+    department = form.get("department", "")
+    project_name = form.get("project_name", "")
+    comment = form.get("comment", "")
+
+    if not file:
+        return {"status": "error", "error": "Файл не выбран"}
+
+    # Save to temp file
+    content = await file.read()
+    ext = os.path.splitext(file.filename)[1].lower()
+
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        # Extract text
+        text = await extract_text(tmp_path)
+        if isinstance(text, tuple):
+            text = text[0] if text else ""
+        os.unlink(tmp_path)
+
+        if not text or len(text.strip()) < 20:
+            return {"status": "error", "error": "Не удалось извлечь текст из файла"}
+
+        # Load into RAG
+        title = os.path.splitext(file.filename)[0]
+        if comment:
+            title = f"{title} ({comment})"
+
+        chunks_count = await rag_service.add_document(
+            text=text,
+            category=category,
+            title=title,
+            source=f"admin:{file.filename}",
+            project_name=project_name,
+        )
+
+        # Register in document registry
+        registry_path = "/app/data/loaded_documents.json"
+        try:
+            if os.path.exists(registry_path):
+                with open(registry_path, "r") as f:
+                    registry = json_lib.load(f)
+            else:
+                registry = {"documents": []}
+        except Exception:
+            registry = {"documents": []}
+
+        content_hash = hashlib.sha256(content).hexdigest()[:16]
+        from datetime import datetime
+        registry["documents"].append({
+            "filename": file.filename,
+            "title": title,
+            "category": category,
+            "content_hash": content_hash,
+            "chunks": chunks_count,
+            "project_name": project_name,
+            "department": department,
+            "comment": comment,
+            "source": "admin",
+            "loaded_at": datetime.now().isoformat(),
+            "loaded_by": "Админ",
+        })
+
+        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        with open(registry_path, "w") as f:
+            json_lib.dump(registry, f, ensure_ascii=False, indent=2)
+
+        return {"status": "ok", "chunks": chunks_count, "title": title}
+
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        return {"status": "error", "error": str(e)}
+
+
 @admin_router.get("/api/reports")
 async def api_get_reports(request: Request, session: AsyncSession = Depends(get_session)):
     """Get daily reports with optional filters."""
@@ -861,14 +954,15 @@ ADMIN_HTML = """<!DOCTYPE html>
         <div class="tab-content" id="tab-rag">
             <div class="page-header">
                 <h1>📚 База знаний (RAG)</h1>
+                <button class="btn btn-primary" onclick="openUploadDoc()">➕ Добавить документ</button>
             </div>
             <div class="card">
                 <table>
                     <thead>
-                        <tr><th>Название</th><th>Категория</th><th>Фрагментов</th><th>Дата</th><th>Загрузил</th></tr>
+                        <tr><th>Название</th><th>Категория</th><th>Отдел/Объект</th><th>Фрагментов</th><th>Дата</th><th>Загрузил</th></tr>
                     </thead>
                     <tbody id="rag-table">
-                        <tr><td colspan="5" class="loading">Загрузка...</td></tr>
+                        <tr><td colspan="6" class="loading">Загрузка...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -955,6 +1049,53 @@ ADMIN_HTML = """<!DOCTYPE html>
             <div style="display:flex;gap:12px;margin-top:20px;">
                 <button class="btn btn-primary" onclick="saveProject()">Сохранить</button>
                 <button class="btn" style="background:#eee;" onclick="closeModal('modal-project')">Отмена</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- UPLOAD DOCUMENT MODAL -->
+    <div class="modal-overlay" id="modal-doc">
+        <div class="modal">
+            <h3>Добавить документ в базу знаний</h3>
+            <div class="form-group">
+                <label>Файл *</label>
+                <input type="file" id="doc-file" accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.csv,.pptx,.md,.json">
+            </div>
+            <div class="form-group">
+                <label>Категория *</label>
+                <select id="doc-category">
+                    <option value="contract">📄 Договор</option>
+                    <option value="act">📋 Акт (КС-2, КС-3)</option>
+                    <option value="regulation">📖 Регламент/Инструкция</option>
+                    <option value="normative">📐 Норматив (СНиП, ГОСТ, СП)</option>
+                    <option value="request">📦 Заявка ТМЦ</option>
+                    <option value="protocol">📝 Протокол совещания</option>
+                    <option value="report">📊 Отчёт</option>
+                    <option value="estimate">💰 Смета/Расчёт</option>
+                    <option value="safety">🦺 Документ по ТБ</option>
+                    <option value="hr">👤 Кадровый документ</option>
+                    <option value="other">📁 Прочее</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Отдел</label>
+                <select id="doc-department">
+                    <option value="">— Не указан</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Объект</label>
+                <select id="doc-project">
+                    <option value="">— Не привязан</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Комментарий</label>
+                <textarea id="doc-comment" rows="3" placeholder="Описание документа..."></textarea>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:20px;">
+                <button class="btn btn-primary" onclick="uploadDocument()">Загрузить</button>
+                <button class="btn" style="background:#eee;" onclick="closeModal('modal-doc')">Отмена</button>
             </div>
         </div>
     </div>
@@ -1189,6 +1330,67 @@ ADMIN_HTML = """<!DOCTYPE html>
             tbody.innerHTML = html;
         }
 
+        function openUploadDoc() {
+            // Populate department and project selects
+            var deptSel = document.getElementById('doc-department');
+            deptSel.innerHTML = '<option value="">\u2014 \u041d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d</option>';
+            departments.forEach(function(d) {
+                var opt = document.createElement('option');
+                opt.value = d.name; opt.textContent = d.name;
+                deptSel.appendChild(opt);
+            });
+            // Projects from existing data
+            fetch('/admin/api/projects').then(function(r){return r.json();}).then(function(data){
+                var projSel = document.getElementById('doc-project');
+                projSel.innerHTML = '<option value="">\u2014 \u041d\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d</option>';
+                (data.projects||[]).forEach(function(p){
+                    var opt = document.createElement('option');
+                    opt.value = p.name; opt.textContent = p.name;
+                    projSel.appendChild(opt);
+                });
+            });
+            document.getElementById('modal-doc').classList.add('active');
+        }
+
+        async function uploadDocument() {
+            var fileInput = document.getElementById('doc-file');
+            var category = document.getElementById('doc-category').value;
+            var department = document.getElementById('doc-department').value;
+            var project = document.getElementById('doc-project').value;
+            var comment = document.getElementById('doc-comment').value;
+
+            if (!fileInput.files.length) {
+                showToast('\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u0430\u0439\u043b', 'error');
+                return;
+            }
+
+            var formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('category', category);
+            formData.append('department', department);
+            formData.append('project_name', project);
+            formData.append('comment', comment);
+
+            try {
+                showToast('\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430...', 'success');
+                var resp = await fetch('/admin/api/upload-document', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (resp.status === 401) { window.location.href = '/admin'; return; }
+                var result = await resp.json();
+                if (result.status === 'ok') {
+                    showToast('\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d (' + result.chunks + ' \u0444\u0440\u0430\u0433\u043c\u0435\u043d\u0442\u043e\u0432)', 'success');
+                    closeModal('modal-doc');
+                    loadRagDocuments();
+                } else {
+                    showToast(result.error || '\u041e\u0448\u0438\u0431\u043a\u0430', 'error');
+                }
+            } catch(e) {
+                showToast('\u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u0435\u0442\u0438', 'error');
+            }
+        }
+
         async function loadRagDocuments() {
             try {
                 var resp = await fetch('/admin/api/rag-documents');
@@ -1196,14 +1398,14 @@ ADMIN_HTML = """<!DOCTYPE html>
                 var data = await resp.json();
                 renderRagDocuments(data.documents);
             } catch(e) {
-                document.getElementById('rag-table').innerHTML = '<tr><td colspan="5">Ошибка загрузки</td></tr>';
+                document.getElementById('rag-table').innerHTML = '<tr><td colspan="6">Ошибка загрузки</td></tr>';
             }
         }
 
         function renderRagDocuments(docs) {
             var tbody = document.getElementById('rag-table');
             if (!docs.length) {
-                tbody.innerHTML = '<tr><td colspan="5">Нет загруженных документов</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6">Нет загруженных документов</td></tr>';
                 return;
             }
             var categories = {
@@ -1224,9 +1426,11 @@ ADMIN_HTML = """<!DOCTYPE html>
             docs.forEach(function(d) {
                 var cat = categories[d.category] || d.category;
                 var date = (d.loaded_at || '').substring(0, 10);
+                var proj = d.project_name || d.department || '\u2014';
                 html += '<tr>';
                 html += '<td><b>' + (d.title || d.filename) + '</b></td>';
                 html += '<td>' + cat + '</td>';
+                html += '<td>' + proj + '</td>';
                 html += '<td>' + (d.chunks || '?') + '</td>';
                 html += '<td>' + date + '</td>';
                 html += '<td>' + (d.loaded_by || '-') + '</td>';
@@ -1400,6 +1604,8 @@ ADMIN_HTML = """<!DOCTYPE html>
         window.loadReports = loadReports;
         window.sortReports = sortReports;
         window.loadRagDocuments = loadRagDocuments;
+        window.openUploadDoc = openUploadDoc;
+        window.uploadDocument = uploadDocument;
         window.openAddUser = openAddUser;
         window.editUser = editUser;
         window.openAddProject = openAddProject;
