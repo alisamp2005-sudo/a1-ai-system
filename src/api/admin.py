@@ -410,7 +410,7 @@ LOGIN_HTML = """<!DOCTYPE html>
         <p>Введите логин и пароль для входа</p>
         <div class="form-group">
             <label>Логин</label>
-            <input type="text" id="login-username" placeholder="admin" autofocus>
+            <input type="text" id="login-username" value="admin" autofocus>
         </div>
         <div class="form-group">
             <label>Пароль</label>
@@ -661,10 +661,10 @@ ADMIN_HTML = """<!DOCTYPE html>
 <body>
     <div class="sidebar">
         <h2>А1 Админ</h2>
-        <a class="active" onclick="showTab('users', this)"><span class="icon">👥</span>Сотрудники</a>
-        <a onclick="showTab('projects', this)"><span class="icon">🏗</span>Объекты</a>
-        <a onclick="showTab('departments', this)"><span class="icon">🏢</span>Отделы</a>
-        <a onclick="showTab('system', this)"><span class="icon">⚙️</span>Система</a>
+        <a class="active" href="javascript:void(0)" onclick="showTab('users', this)"><span class="icon">👥</span>Сотрудники</a>
+        <a href="javascript:void(0)" onclick="showTab('projects', this)"><span class="icon">🏗</span>Объекты</a>
+        <a href="javascript:void(0)" onclick="showTab('departments', this)"><span class="icon">🏢</span>Отделы</a>
+        <a href="javascript:void(0)" onclick="showTab('system', this)"><span class="icon">⚙️</span>Система</a>
         <a href="/dashboard"><span class="icon">📊</span>Дашборд</a>
         <button class="logout-btn" onclick="doLogout()">Выйти</button>
     </div>
