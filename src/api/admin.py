@@ -308,6 +308,48 @@ async def api_create_project(data: ProjectCreate, request: Request, session: Asy
     return {"status": "ok", "id": str(project.id), "name": project.name}
 
 
+@admin_router.put("/api/projects/{project_id}")
+async def api_update_project(project_id: str, request: Request, session: AsyncSession = Depends(get_session)):
+    """Update project status."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    import json as json_lib
+    body = await request.body()
+    data = json_lib.loads(body)
+
+    result = await session.execute(select(Project).where(Project.id == int(project_id)))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if "status" in data:
+        project.status = data["status"]
+    if "name" in data:
+        project.name = data["name"]
+    if "address" in data:
+        project.address = data["address"]
+
+    await session.commit()
+    return {"status": "ok", "id": str(project.id), "name": project.name}
+
+
+@admin_router.get("/api/rag-documents")
+async def api_get_rag_documents(request: Request):
+    """Get list of loaded RAG documents."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    import os
+    registry_path = "/app/data/loaded_documents.json"
+    if os.path.exists(registry_path):
+        import json as json_lib
+        with open(registry_path, "r") as f:
+            registry = json_lib.load(f)
+        return {"documents": registry.get("documents", [])}
+    return {"documents": []}
+
+
 @admin_router.get("/api/departments")
 async def api_get_departments(request: Request, session: AsyncSession = Depends(get_session)):
     """Get all departments."""
@@ -664,6 +706,7 @@ ADMIN_HTML = """<!DOCTYPE html>
         <a class="active" href="javascript:void(0)" onclick="showTab('users', this)"><span class="icon">👥</span>Сотрудники</a>
         <a href="javascript:void(0)" onclick="showTab('projects', this)"><span class="icon">🏗</span>Объекты</a>
         <a href="javascript:void(0)" onclick="showTab('departments', this)"><span class="icon">🏢</span>Отделы</a>
+        <a href="javascript:void(0)" onclick="showTab('rag', this)"><span class="icon">📚</span>База знаний</a>
         <a href="javascript:void(0)" onclick="showTab('system', this)"><span class="icon">⚙️</span>Система</a>
         <a href="/dashboard"><span class="icon">📊</span>Дашборд</a>
         <button class="logout-btn" onclick="doLogout()">Выйти</button>
@@ -704,7 +747,7 @@ ADMIN_HTML = """<!DOCTYPE html>
             <div class="card">
                 <table>
                     <thead>
-                        <tr><th>Название</th><th>Адрес</th><th>Статус</th></tr>
+                        <tr><th>Название</th><th>Адрес</th><th>Статус</th><th>Действия</th></tr>
                     </thead>
                     <tbody id="projects-table">
                         <tr><td colspan="3" class="loading">Загрузка...</td></tr>
@@ -723,6 +766,23 @@ ADMIN_HTML = """<!DOCTYPE html>
                     <thead><tr><th>Название</th></tr></thead>
                     <tbody id="departments-table">
                         <tr><td class="loading">Загрузка...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- RAG DOCUMENTS TAB -->
+        <div class="tab-content" id="tab-rag">
+            <div class="page-header">
+                <h1>📚 База знаний (RAG)</h1>
+            </div>
+            <div class="card">
+                <table>
+                    <thead>
+                        <tr><th>Название</th><th>Категория</th><th>Фрагментов</th><th>Дата</th><th>Загрузил</th></tr>
+                    </thead>
+                    <tbody id="rag-table">
+                        <tr><td colspan="5" class="loading">Загрузка...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -819,6 +879,7 @@ ADMIN_HTML = """<!DOCTYPE html>
             loadUsers();
             loadProjects();
             loadDepartments();
+            loadRagDocuments();
         });
 
         function showTab(name, el) {
@@ -909,15 +970,93 @@ ADMIN_HTML = """<!DOCTYPE html>
         function renderProjects(projects) {
             var tbody = document.getElementById('projects-table');
             if (!projects.length) {
-                tbody.innerHTML = '<tr><td colspan="3">Нет объектов</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4">Нет объектов</td></tr>';
                 return;
             }
             var html = '';
             projects.forEach(function(p) {
+                var badgeClass = p.status === 'active' ? 'active' : 'inactive';
+                var statusLabel = p.status === 'active' ? 'Активный' : (p.status === 'completed' ? 'Завершён' : p.status);
                 html += '<tr>';
                 html += '<td><b>' + p.name + '</b></td>';
                 html += '<td>' + p.address + '</td>';
-                html += '<td><span class="badge badge-active">' + p.status + '</span></td>';
+                html += '<td><span class="badge badge-' + badgeClass + '">' + statusLabel + '</span></td>';
+                html += '<td>';
+                if (p.status === 'active') {
+                    html += '<button class="btn btn-sm" data-action="status" data-id="' + p.id + '" data-status="completed">✅ Завершить</button>';
+                } else {
+                    html += '<button class="btn btn-primary btn-sm" data-action="status" data-id="' + p.id + '" data-status="active">▶ Активировать</button>';
+                }
+                html += '</td>';
+                html += '</tr>';
+            });
+            tbody.innerHTML = html;
+            tbody.querySelectorAll('[data-action="status"]').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    changeProjectStatus(this.dataset.id, this.dataset.status);
+                });
+            });
+        }
+
+        async function changeProjectStatus(id, newStatus) {
+            try {
+                var resp = await fetch('/admin/api/projects/' + id, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({status: newStatus})
+                });
+                if (resp.ok) {
+                    showToast('Статус обновлён', 'success');
+                    loadProjects();
+                } else {
+                    showToast('Ошибка', 'error');
+                }
+            } catch(e) {
+                showToast('Ошибка сети', 'error');
+            }
+        }
+
+        async function loadRagDocuments() {
+            try {
+                var resp = await fetch('/admin/api/rag-documents');
+                if (resp.status === 401) { window.location.href = '/admin'; return; }
+                var data = await resp.json();
+                renderRagDocuments(data.documents);
+            } catch(e) {
+                document.getElementById('rag-table').innerHTML = '<tr><td colspan="5">Ошибка загрузки</td></tr>';
+            }
+        }
+
+        function renderRagDocuments(docs) {
+            var tbody = document.getElementById('rag-table');
+            if (!docs.length) {
+                tbody.innerHTML = '<tr><td colspan="5">Нет загруженных документов</td></tr>';
+                return;
+            }
+            var categories = {
+                'contract': '📄 Договор',
+                'act': '📋 Акт',
+                'regulation': '📖 Регламент',
+                'normative': '📐 Норматив',
+                'request': '📦 Заявка ТМЦ',
+                'protocol': '📝 Протокол',
+                'report': '📊 Отчёт',
+                'letter': '✉️ Письмо',
+                'estimate': '💰 Смета',
+                'safety': '🦺 ТБ',
+                'hr': '👤 Кадры',
+                'other': '📁 Прочее'
+            };
+            var html = '';
+            docs.forEach(function(d) {
+                var cat = categories[d.category] || d.category;
+                var date = (d.loaded_at || '').substring(0, 10);
+                html += '<tr>';
+                html += '<td><b>' + (d.title || d.filename) + '</b></td>';
+                html += '<td>' + cat + '</td>';
+                html += '<td>' + (d.chunks || '?') + '</td>';
+                html += '<td>' + date + '</td>';
+                html += '<td>' + (d.loaded_by || '-') + '</td>';
                 html += '</tr>';
             });
             tbody.innerHTML = html;
@@ -1081,6 +1220,7 @@ ADMIN_HTML = """<!DOCTYPE html>
         window.loadUsers = loadUsers;
         window.loadProjects = loadProjects;
         window.loadDepartments = loadDepartments;
+        window.loadRagDocuments = loadRagDocuments;
         window.openAddUser = openAddUser;
         window.editUser = editUser;
         window.openAddProject = openAddProject;
@@ -1088,6 +1228,7 @@ ADMIN_HTML = """<!DOCTYPE html>
         window.saveUser = saveUser;
         window.saveProject = saveProject;
         window.deactivateUser = deactivateUser;
+        window.changeProjectStatus = changeProjectStatus;
         window.doLogout = doLogout;
         window.showToast = showToast;
     </script>

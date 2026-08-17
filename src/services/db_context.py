@@ -40,16 +40,20 @@ class DBContext:
             return ""
 
     async def get_project_by_name(self, name: str) -> str:
-        """Find project by name (partial match) and return details."""
+        """Find active project by name (partial match) and return details."""
         try:
             async with async_session_factory() as session:
+                # Only show active projects to the bot
                 result = await session.execute(
-                    select(Project).where(Project.name.ilike(f"%{name}%"))
+                    select(Project).where(
+                        Project.name.ilike(f"%{name}%"),
+                        Project.status == "active"
+                    )
                 )
                 project = result.scalars().first()
 
                 if not project:
-                    return f"Объект «{name}» не найден в базе данных. Возможно, данные ещё не загружены."
+                    return f"Объект «{name}» не найден среди активных объектов. Возможно, он завершён или данные ещё не загружены."
 
                 # Get manager info
                 manager_name = "не назначен"
