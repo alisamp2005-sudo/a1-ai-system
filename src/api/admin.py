@@ -1,13 +1,15 @@
 """
 Admin Panel — manage users, projects, departments, routing rules.
 Accessible at /admin
-Now with real CRUD API connected to PostgreSQL.
+Protected by login/password authentication.
 """
 
 import logging
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+import hashlib
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy import select, update, delete
@@ -18,6 +20,31 @@ from src.db.models import User, Department, UserDepartment, Project
 
 logger = logging.getLogger(__name__)
 admin_router = APIRouter(prefix="/admin")
+
+# ================================================================
+# ADMIN CREDENTIALS (stored in memory, first admin created on startup)
+# In production, these should be in DB
+# ================================================================
+ADMIN_USERS = {
+    "admin": {
+        "password_hash": hashlib.sha256("A1admin2026!".encode()).hexdigest(),
+        "role": "superadmin",
+        "name": "Администратор",
+    }
+}
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return hash_password(password) == password_hash
+
+
+def check_auth(request: Request) -> bool:
+    """Check if user is authenticated via session."""
+    return request.session.get("admin_authenticated", False)
 
 
 # ================================================================
@@ -48,13 +75,85 @@ class ProjectCreate(BaseModel):
     status: str = "active"
 
 
+class AdminUserCreate(BaseModel):
+    username: str
+    password: str
+    name: str
+    role: str = "admin"
+
+
+class LoginData(BaseModel):
+    username: str
+    password: str
+
+
 # ================================================================
-# API ENDPOINTS
+# AUTH ENDPOINTS
+# ================================================================
+
+@admin_router.post("/api/login")
+async def api_login(data: LoginData, request: Request):
+    """Login to admin panel."""
+    user = ADMIN_USERS.get(data.username)
+    if not user or not verify_password(data.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+    request.session["admin_authenticated"] = True
+    request.session["admin_username"] = data.username
+    request.session["admin_name"] = user["name"]
+    return {"status": "ok", "name": user["name"]}
+
+
+@admin_router.post("/api/logout")
+async def api_logout(request: Request):
+    """Logout from admin panel."""
+    request.session.clear()
+    return {"status": "ok"}
+
+
+@admin_router.post("/api/admin-users")
+async def api_create_admin_user(data: AdminUserCreate, request: Request):
+    """Create a new admin panel user (only superadmin can do this)."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    current_user = ADMIN_USERS.get(request.session.get("admin_username"))
+    if not current_user or current_user["role"] != "superadmin":
+        raise HTTPException(status_code=403, detail="Только суперадмин может создавать пользователей панели")
+
+    if data.username in ADMIN_USERS:
+        raise HTTPException(status_code=400, detail="Пользователь уже существует")
+
+    ADMIN_USERS[data.username] = {
+        "password_hash": hash_password(data.password),
+        "role": data.role,
+        "name": data.name,
+    }
+    return {"status": "ok", "username": data.username}
+
+
+@admin_router.get("/api/admin-users")
+async def api_list_admin_users(request: Request):
+    """List admin panel users."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    return {"users": [
+        {"username": k, "name": v["name"], "role": v["role"]}
+        for k, v in ADMIN_USERS.items()
+    ]}
+
+
+# ================================================================
+# PROTECTED API ENDPOINTS
 # ================================================================
 
 @admin_router.get("/api/users")
-async def api_get_users(session: AsyncSession = Depends(get_session)):
+async def api_get_users(request: Request, session: AsyncSession = Depends(get_session)):
     """Get all users with their departments."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     result = await session.execute(
         select(User).order_by(User.full_name)
     )
@@ -62,7 +161,6 @@ async def api_get_users(session: AsyncSession = Depends(get_session)):
 
     users_list = []
     for u in users:
-        # Get department
         dept_result = await session.execute(
             select(Department.name)
             .join(UserDepartment, UserDepartment.department_id == Department.id)
@@ -84,9 +182,11 @@ async def api_get_users(session: AsyncSession = Depends(get_session)):
 
 
 @admin_router.post("/api/users")
-async def api_create_user(data: UserCreate, session: AsyncSession = Depends(get_session)):
+async def api_create_user(data: UserCreate, request: Request, session: AsyncSession = Depends(get_session)):
     """Create a new user."""
-    # Generate phone if not provided (required field)
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     phone = data.phone_number or f"+7000{str(uuid.uuid4().int)[:7]}"
 
     user = User(
@@ -99,7 +199,6 @@ async def api_create_user(data: UserCreate, session: AsyncSession = Depends(get_
     session.add(user)
     await session.flush()
 
-    # Link to department if specified
     if data.department_name:
         dept_result = await session.execute(
             select(Department).where(Department.name == data.department_name)
@@ -114,8 +213,11 @@ async def api_create_user(data: UserCreate, session: AsyncSession = Depends(get_
 
 
 @admin_router.put("/api/users/{user_id}")
-async def api_update_user(user_id: str, data: UserUpdate, session: AsyncSession = Depends(get_session)):
+async def api_update_user(user_id: str, data: UserUpdate, request: Request, session: AsyncSession = Depends(get_session)):
     """Update an existing user."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     result = await session.execute(
         select(User).where(User.id == uuid.UUID(user_id))
     )
@@ -134,9 +236,7 @@ async def api_update_user(user_id: str, data: UserUpdate, session: AsyncSession 
     if data.is_active is not None:
         user.is_active = data.is_active
 
-    # Update department if specified
     if data.department_name is not None:
-        # Remove old department links
         await session.execute(
             delete(UserDepartment).where(UserDepartment.user_id == user.id)
         )
@@ -154,8 +254,11 @@ async def api_update_user(user_id: str, data: UserUpdate, session: AsyncSession 
 
 
 @admin_router.delete("/api/users/{user_id}")
-async def api_delete_user(user_id: str, session: AsyncSession = Depends(get_session)):
+async def api_delete_user(user_id: str, request: Request, session: AsyncSession = Depends(get_session)):
     """Deactivate a user (soft delete)."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     result = await session.execute(
         select(User).where(User.id == uuid.UUID(user_id))
     )
@@ -169,8 +272,11 @@ async def api_delete_user(user_id: str, session: AsyncSession = Depends(get_sess
 
 
 @admin_router.get("/api/projects")
-async def api_get_projects(session: AsyncSession = Depends(get_session)):
+async def api_get_projects(request: Request, session: AsyncSession = Depends(get_session)):
     """Get all projects."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     result = await session.execute(
         select(Project).order_by(Project.name)
     )
@@ -187,8 +293,11 @@ async def api_get_projects(session: AsyncSession = Depends(get_session)):
 
 
 @admin_router.post("/api/projects")
-async def api_create_project(data: ProjectCreate, session: AsyncSession = Depends(get_session)):
-    """Create a new project (construction site)."""
+async def api_create_project(data: ProjectCreate, request: Request, session: AsyncSession = Depends(get_session)):
+    """Create a new project."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     project = Project(
         name=data.name,
         address=data.address,
@@ -200,8 +309,11 @@ async def api_create_project(data: ProjectCreate, session: AsyncSession = Depend
 
 
 @admin_router.get("/api/departments")
-async def api_get_departments(session: AsyncSession = Depends(get_session)):
+async def api_get_departments(request: Request, session: AsyncSession = Depends(get_session)):
     """Get all departments."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     result = await session.execute(select(Department))
     departments = result.scalars().all()
     return {"departments": [
@@ -211,24 +323,163 @@ async def api_get_departments(session: AsyncSession = Depends(get_session)):
 
 
 # ================================================================
-# ADMIN HTML (SPA with real API calls)
+# LOGIN PAGE HTML
 # ================================================================
 
-ADMIN_HTML = """
-<!DOCTYPE html>
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>А1 — Вход в админ-панель</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: white;
+            border-radius: 16px;
+            padding: 48px 40px;
+            width: 400px;
+            max-width: 90%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .login-card h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+            color: #1a1a2e;
+        }
+        .login-card p {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 15px;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #2196f3;
+        }
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-login:hover { background: #1976d2; }
+        .error-msg {
+            color: #f44336;
+            font-size: 13px;
+            margin-top: 12px;
+            display: none;
+        }
+        .error-msg.show { display: block; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1>А1 Админ-панель</h1>
+        <p>Введите логин и пароль для входа</p>
+        <div class="form-group">
+            <label>Логин</label>
+            <input type="text" id="login-username" placeholder="admin" autofocus>
+        </div>
+        <div class="form-group">
+            <label>Пароль</label>
+            <input type="password" id="login-password" placeholder="Пароль">
+        </div>
+        <button class="btn-login" onclick="doLogin()">Войти</button>
+        <div class="error-msg" id="error-msg">Неверный логин или пароль</div>
+    </div>
+    <script>
+        document.getElementById('login-password').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') doLogin();
+        });
+        document.getElementById('login-username').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') document.getElementById('login-password').focus();
+        });
+
+        async function doLogin() {
+            const username = document.getElementById('login-username').value.trim();
+            const password = document.getElementById('login-password').value;
+            const errEl = document.getElementById('error-msg');
+            errEl.classList.remove('show');
+
+            if (!username || !password) {
+                errEl.textContent = 'Заполните все поля';
+                errEl.classList.add('show');
+                return;
+            }
+
+            try {
+                const resp = await fetch('/admin/api/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+
+                if (resp.ok) {
+                    window.location.href = '/admin/panel';
+                } else {
+                    errEl.textContent = 'Неверный логин или пароль';
+                    errEl.classList.add('show');
+                }
+            } catch(e) {
+                errEl.textContent = 'Ошибка сети';
+                errEl.classList.add('show');
+            }
+        }
+    </script>
+</body>
+</html>"""
+
+
+# ================================================================
+# ADMIN PANEL HTML (protected)
+# ================================================================
+
+ADMIN_HTML = """<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>А1 — Админ-панель</title>
     <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f0f2f5;
             color: #1a1a2e;
-        }}
-        .sidebar {{
+        }
+        .sidebar {
             position: fixed;
             left: 0; top: 0; bottom: 0;
             width: 240px;
@@ -236,13 +487,13 @@ ADMIN_HTML = """
             color: white;
             padding: 24px 0;
             overflow-y: auto;
-        }}
-        .sidebar h2 {{
+        }
+        .sidebar h2 {
             padding: 0 20px;
             font-size: 18px;
             margin-bottom: 24px;
-        }}
-        .sidebar a {{
+        }
+        .sidebar a {
             display: block;
             padding: 12px 20px;
             color: #aaa;
@@ -250,24 +501,38 @@ ADMIN_HTML = """
             font-size: 14px;
             transition: all 0.2s;
             cursor: pointer;
-        }}
-        .sidebar a:hover, .sidebar a.active {{
+        }
+        .sidebar a:hover, .sidebar a.active {
             background: rgba(255,255,255,0.1);
             color: white;
-        }}
-        .sidebar a .icon {{ margin-right: 10px; }}
-        .main {{
+        }
+        .sidebar a .icon { margin-right: 10px; }
+        .sidebar .logout-btn {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            padding: 10px;
+            background: rgba(244,67,54,0.2);
+            color: #f44336;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .sidebar .logout-btn:hover { background: rgba(244,67,54,0.3); }
+        .main {
             margin-left: 240px;
             padding: 24px;
-        }}
-        .page-header {{
+        }
+        .page-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 24px;
-        }}
-        .page-header h1 {{ font-size: 24px; }}
-        .btn {{
+        }
+        .page-header h1 { font-size: 24px; }
+        .btn {
             padding: 10px 20px;
             border: none;
             border-radius: 8px;
@@ -275,51 +540,51 @@ ADMIN_HTML = """
             font-weight: 500;
             cursor: pointer;
             transition: opacity 0.2s;
-        }}
-        .btn:hover {{ opacity: 0.85; }}
-        .btn-primary {{ background: #2196f3; color: white; }}
-        .btn-danger {{ background: #f44336; color: white; }}
-        .btn-success {{ background: #4caf50; color: white; }}
-        .btn-sm {{ padding: 6px 12px; font-size: 12px; }}
-        .card {{
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary { background: #2196f3; color: white; }
+        .btn-danger { background: #f44336; color: white; }
+        .btn-success { background: #4caf50; color: white; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .card {
             background: white;
             border-radius: 12px;
             padding: 24px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.06);
             margin-bottom: 24px;
-        }}
-        table {{
+        }
+        table {
             width: 100%;
             border-collapse: collapse;
-        }}
-        th, td {{
+        }
+        th, td {
             padding: 12px 16px;
             text-align: left;
             border-bottom: 1px solid #f0f0f0;
-        }}
-        th {{
+        }
+        th {
             font-size: 12px;
             text-transform: uppercase;
             color: #999;
             font-weight: 600;
-        }}
-        td {{ font-size: 14px; }}
-        .badge {{
+        }
+        td { font-size: 14px; }
+        .badge {
             padding: 4px 10px;
             border-radius: 12px;
             font-size: 12px;
             font-weight: 500;
             display: inline-block;
-        }}
-        .badge-admin {{ background: #e3f2fd; color: #1565c0; }}
-        .badge-manager {{ background: #fff3e0; color: #e65100; }}
-        .badge-top_manager {{ background: #fce4ec; color: #c62828; }}
-        .badge-worker {{ background: #e8f5e9; color: #2e7d32; }}
-        .badge-active {{ background: #e8f5e9; color: #2e7d32; }}
-        .badge-inactive {{ background: #fafafa; color: #999; }}
-        .tab-content {{ display: none; }}
-        .tab-content.active {{ display: block; }}
-        .modal-overlay {{
+        }
+        .badge-admin { background: #e3f2fd; color: #1565c0; }
+        .badge-manager { background: #fff3e0; color: #e65100; }
+        .badge-top_manager { background: #fce4ec; color: #c62828; }
+        .badge-worker { background: #e8f5e9; color: #2e7d32; }
+        .badge-active { background: #e8f5e9; color: #2e7d32; }
+        .badge-inactive { background: #fafafa; color: #999; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .modal-overlay {
             display: none;
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -327,9 +592,9 @@ ADMIN_HTML = """
             z-index: 1000;
             justify-content: center;
             align-items: center;
-        }}
-        .modal-overlay.show {{ display: flex; }}
-        .modal {{
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
             background: white;
             border-radius: 12px;
             padding: 32px;
@@ -337,30 +602,30 @@ ADMIN_HTML = """
             max-width: 90%;
             max-height: 90vh;
             overflow-y: auto;
-        }}
-        .modal h3 {{ margin-bottom: 20px; }}
-        .form-group {{
+        }
+        .modal h3 { margin-bottom: 20px; }
+        .form-group {
             margin-bottom: 16px;
-        }}
-        .form-group label {{
+        }
+        .form-group label {
             display: block;
             font-size: 13px;
             font-weight: 500;
             color: #666;
             margin-bottom: 6px;
-        }}
-        .form-group input, .form-group select {{
+        }
+        .form-group input, .form-group select {
             width: 100%;
             padding: 10px 12px;
             border: 1px solid #ddd;
             border-radius: 8px;
             font-size: 14px;
-        }}
-        .form-group input:focus, .form-group select:focus {{
+        }
+        .form-group input:focus, .form-group select:focus {
             outline: none;
             border-color: #2196f3;
-        }}
-        .toast {{
+        }
+        .toast {
             position: fixed;
             bottom: 24px;
             right: 24px;
@@ -371,26 +636,26 @@ ADMIN_HTML = """
             font-size: 14px;
             z-index: 2000;
             display: none;
-        }}
-        .toast.show {{ display: block; }}
-        .toast.success {{ background: #4caf50; }}
-        .toast.error {{ background: #f44336; }}
-        .stats-grid {{
+        }
+        .toast.show { display: block; }
+        .toast.success { background: #4caf50; }
+        .toast.error { background: #f44336; }
+        .stats-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 16px;
             margin-bottom: 24px;
-        }}
-        .stat-card {{
+        }
+        .stat-card {
             background: white;
             border-radius: 10px;
             padding: 20px;
             text-align: center;
             box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-        }}
-        .stat-card .value {{ font-size: 28px; font-weight: 700; }}
-        .stat-card .label {{ font-size: 12px; color: #999; margin-top: 4px; }}
-        .loading {{ text-align: center; padding: 40px; color: #999; }}
+        }
+        .stat-card .value { font-size: 28px; font-weight: 700; }
+        .stat-card .label { font-size: 12px; color: #999; margin-top: 4px; }
+        .loading { text-align: center; padding: 40px; color: #999; }
     </style>
 </head>
 <body>
@@ -401,6 +666,7 @@ ADMIN_HTML = """
         <a onclick="showTab('departments', this)"><span class="icon">🏢</span>Отделы</a>
         <a onclick="showTab('system', this)"><span class="icon">⚙️</span>Система</a>
         <a href="/dashboard"><span class="icon">📊</span>Дашборд</a>
+        <button class="logout-btn" onclick="doLogout()">Выйти</button>
     </div>
 
     <div class="main">
@@ -482,18 +748,6 @@ ADMIN_HTML = """
                     </tbody>
                 </table>
             </div>
-            <div class="card">
-                <h3 style="margin-bottom:16px;">AI Модели (Ollama)</h3>
-                <table>
-                    <thead><tr><th>Модель</th><th>Размер</th><th>Назначение</th></tr></thead>
-                    <tbody>
-                        <tr><td>qwen2.5:32b</td><td>19 ГБ</td><td>Юрист, Финансист, QA, Секретарь</td></tr>
-                        <tr><td>llama3.1:8b</td><td>4.9 ГБ</td><td>Router, HR, Снабженец, Аналитик, Сводчик</td></tr>
-                        <tr><td>llama3.2-vision:11b</td><td>7.8 ГБ</td><td>Анализ фото ТБ (через mlx-vlm)</td></tr>
-                        <tr><td>nomic-embed-text</td><td>0.3 ГБ</td><td>Векторизация (RAG)</td></tr>
-                    </tbody>
-                </table>
-            </div>
         </div>
     </div>
 
@@ -530,7 +784,7 @@ ADMIN_HTML = """
                 </select>
             </div>
             <div style="display:flex;gap:12px;margin-top:20px;">
-                <button class="btn btn-primary" onclick="saveUser()">💾 Сохранить</button>
+                <button class="btn btn-primary" onclick="saveUser()">Сохранить</button>
                 <button class="btn" style="background:#eee;" onclick="closeModal('modal-user')">Отмена</button>
             </div>
         </div>
@@ -542,14 +796,14 @@ ADMIN_HTML = """
             <h3>Добавить объект</h3>
             <div class="form-group">
                 <label>Название *</label>
-                <input type="text" id="project-name" placeholder="Михалковская">
+                <input type="text" id="project-name" placeholder="Название объекта">
             </div>
             <div class="form-group">
                 <label>Адрес</label>
-                <input type="text" id="project-address" placeholder="г. Москва, ул. Михалковская, д. 1">
+                <input type="text" id="project-address" placeholder="г. Москва, ул. ...">
             </div>
             <div style="display:flex;gap:12px;margin-top:20px;">
-                <button class="btn btn-primary" onclick="saveProject()">💾 Сохранить</button>
+                <button class="btn btn-primary" onclick="saveProject()">Сохранить</button>
                 <button class="btn" style="background:#eee;" onclick="closeModal('modal-project')">Отмена</button>
             </div>
         </div>
@@ -559,118 +813,120 @@ ADMIN_HTML = """
     <div class="toast" id="toast"></div>
 
     <script>
-        // ============ STATE ============
         let departments = [];
 
-        // ============ INIT ============
-        document.addEventListener('DOMContentLoaded', () => {{
+        document.addEventListener('DOMContentLoaded', function() {
             loadUsers();
             loadProjects();
             loadDepartments();
-        }});
+        });
 
-        // ============ TABS ============
-        function showTab(name, el) {{
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+        function showTab(name, el) {
+            document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+            document.querySelectorAll('.sidebar a').forEach(function(a) { a.classList.remove('active'); });
             document.getElementById('tab-' + name).classList.add('active');
             if (el) el.classList.add('active');
-        }}
+        }
 
-        // ============ LOAD DATA ============
-        async function loadUsers() {{
-            try {{
+        async function loadUsers() {
+            try {
                 const resp = await fetch('/admin/api/users');
+                if (resp.status === 401) { window.location.href = '/admin'; return; }
                 const data = await resp.json();
                 renderUsers(data.users);
                 document.getElementById('stat-users').textContent = data.users.length;
-                document.getElementById('stat-active').textContent = data.users.filter(u => u.is_active).length;
-            }} catch(e) {{
+                document.getElementById('stat-active').textContent = data.users.filter(function(u) { return u.is_active; }).length;
+            } catch(e) {
                 document.getElementById('users-table').innerHTML = '<tr><td colspan="6">Ошибка загрузки</td></tr>';
-            }}
-        }}
+            }
+        }
 
-        async function loadProjects() {{
-            try {{
+        async function loadProjects() {
+            try {
                 const resp = await fetch('/admin/api/projects');
+                if (resp.status === 401) { window.location.href = '/admin'; return; }
                 const data = await resp.json();
                 renderProjects(data.projects);
                 document.getElementById('stat-projects').textContent = data.projects.length;
-            }} catch(e) {{
+            } catch(e) {
                 document.getElementById('projects-table').innerHTML = '<tr><td colspan="3">Ошибка загрузки</td></tr>';
-            }}
-        }}
+            }
+        }
 
-        async function loadDepartments() {{
-            try {{
+        async function loadDepartments() {
+            try {
                 const resp = await fetch('/admin/api/departments');
+                if (resp.status === 401) { window.location.href = '/admin'; return; }
                 const data = await resp.json();
                 departments = data.departments;
                 renderDepartments(departments);
                 document.getElementById('stat-departments').textContent = departments.length;
-                // Fill department select
-                const sel = document.getElementById('user-dept');
+                var sel = document.getElementById('user-dept');
                 sel.innerHTML = '<option value="">— Не выбран —</option>';
-                departments.forEach(d => {{
-                    sel.innerHTML += `<option value="${{d.name}}">${{d.name}}</option>`;
-                }});
-            }} catch(e) {{}}
-        }}
+                departments.forEach(function(d) {
+                    sel.innerHTML += '<option value="' + d.name + '">' + d.name + '</option>';
+                });
+            } catch(e) {}
+        }
 
-        // ============ RENDER ============
-        function renderUsers(users) {{
-            const tbody = document.getElementById('users-table');
-            if (!users.length) {{
+        function renderUsers(users) {
+            var tbody = document.getElementById('users-table');
+            if (!users.length) {
                 tbody.innerHTML = '<tr><td colspan="6">Нет сотрудников</td></tr>';
                 return;
-            }}
-            tbody.innerHTML = users.map(u => `
-                <tr>
-                    <td><b>${{u.full_name}}</b></td>
-                    <td><span class="badge badge-${{u.role}}">${{roleLabel(u.role)}}</span></td>
-                    <td>${{u.department}}</td>
-                    <td>${{u.telegram_id}}</td>
-                    <td><span class="badge badge-${{u.is_active ? 'active' : 'inactive'}}">${{u.is_active ? 'Активен' : 'Неактивен'}}</span></td>
-                    <td>
-                        <button class="btn btn-primary btn-sm" onclick="editUser('${{u.id}}', '${{u.full_name}}', '${{u.telegram_id}}', '${{u.phone_number}}', '${{u.role}}', '${{u.department}}')">✏️</button>
-                        <button class="btn btn-danger btn-sm" onclick="deactivateUser('${{u.id}}', '${{u.full_name}}')">🗑</button>
-                    </td>
-                </tr>
-            `).join('');
-        }}
+            }
+            var html = '';
+            users.forEach(function(u) {
+                html += '<tr>';
+                html += '<td><b>' + u.full_name + '</b></td>';
+                html += '<td><span class="badge badge-' + u.role + '">' + roleLabel(u.role) + '</span></td>';
+                html += '<td>' + u.department + '</td>';
+                html += '<td>' + u.telegram_id + '</td>';
+                html += '<td><span class="badge badge-' + (u.is_active ? 'active' : 'inactive') + '">' + (u.is_active ? 'Активен' : 'Неактивен') + '</span></td>';
+                html += '<td>';
+                html += '<button class="btn btn-primary btn-sm" onclick="editUser(\'' + u.id + '\',\'' + u.full_name.replace(/'/g, "\\'") + '\',\'' + u.telegram_id + '\',\'' + u.phone_number + '\',\'' + u.role + '\',\'' + u.department + '\')">✏️</button> ';
+                html += '<button class="btn btn-danger btn-sm" onclick="deactivateUser(\'' + u.id + '\',\'' + u.full_name.replace(/'/g, "\\'") + '\')">🗑</button>';
+                html += '</td>';
+                html += '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
 
-        function renderProjects(projects) {{
-            const tbody = document.getElementById('projects-table');
-            if (!projects.length) {{
+        function renderProjects(projects) {
+            var tbody = document.getElementById('projects-table');
+            if (!projects.length) {
                 tbody.innerHTML = '<tr><td colspan="3">Нет объектов</td></tr>';
                 return;
-            }}
-            tbody.innerHTML = projects.map(p => `
-                <tr>
-                    <td><b>${{p.name}}</b></td>
-                    <td>${{p.address}}</td>
-                    <td><span class="badge badge-active">${{p.status}}</span></td>
-                </tr>
-            `).join('');
-        }}
+            }
+            var html = '';
+            projects.forEach(function(p) {
+                html += '<tr>';
+                html += '<td><b>' + p.name + '</b></td>';
+                html += '<td>' + p.address + '</td>';
+                html += '<td><span class="badge badge-active">' + p.status + '</span></td>';
+                html += '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
 
-        function renderDepartments(depts) {{
-            const tbody = document.getElementById('departments-table');
-            tbody.innerHTML = depts.map(d => `<tr><td>${{d.name}}</td></tr>`).join('');
-        }}
+        function renderDepartments(depts) {
+            var tbody = document.getElementById('departments-table');
+            var html = '';
+            depts.forEach(function(d) { html += '<tr><td>' + d.name + '</td></tr>'; });
+            tbody.innerHTML = html;
+        }
 
-        function roleLabel(role) {{
-            const labels = {{
+        function roleLabel(role) {
+            var labels = {
                 'admin': 'Админ',
                 'top_manager': 'ТОП',
                 'manager': 'Руководитель',
                 'worker': 'Сотрудник'
-            }};
+            };
             return labels[role] || role;
-        }}
+        }
 
-        // ============ MODALS ============
-        function openAddUser() {{
+        function openAddUser() {
             document.getElementById('modal-user-title').textContent = 'Добавить сотрудника';
             document.getElementById('edit-user-id').value = '';
             document.getElementById('user-name').value = '';
@@ -679,142 +935,152 @@ ADMIN_HTML = """
             document.getElementById('user-role').value = 'worker';
             document.getElementById('user-dept').value = '';
             document.getElementById('modal-user').classList.add('show');
-        }}
+        }
 
-        function editUser(id, name, tg, phone, role, dept) {{
+        function editUser(id, name, tg, phone, role, dept) {
             document.getElementById('modal-user-title').textContent = 'Редактировать сотрудника';
             document.getElementById('edit-user-id').value = id;
             document.getElementById('user-name').value = name;
-            document.getElementById('user-tg').value = tg === '—' ? '' : tg;
-            document.getElementById('user-phone').value = phone === '—' ? '' : phone;
+            document.getElementById('user-tg').value = (tg === '—') ? '' : tg;
+            document.getElementById('user-phone').value = (phone === '—') ? '' : phone;
             document.getElementById('user-role').value = role;
-            document.getElementById('user-dept').value = dept === '—' ? '' : dept;
+            document.getElementById('user-dept').value = (dept === '—') ? '' : dept;
             document.getElementById('modal-user').classList.add('show');
-        }}
+        }
 
-        function openAddProject() {{
+        function openAddProject() {
             document.getElementById('project-name').value = '';
             document.getElementById('project-address').value = '';
             document.getElementById('modal-project').classList.add('show');
-        }}
+        }
 
-        function closeModal(id) {{
+        function closeModal(id) {
             document.getElementById(id).classList.remove('show');
-        }}
+        }
 
-        // ============ SAVE ============
-        async function saveUser() {{
-            const id = document.getElementById('edit-user-id').value;
-            const name = document.getElementById('user-name').value.trim();
-            const tg = document.getElementById('user-tg').value.trim();
-            const phone = document.getElementById('user-phone').value.trim();
-            const role = document.getElementById('user-role').value;
-            const dept = document.getElementById('user-dept').value;
+        async function saveUser() {
+            var id = document.getElementById('edit-user-id').value;
+            var name = document.getElementById('user-name').value.trim();
+            var tg = document.getElementById('user-tg').value.trim();
+            var phone = document.getElementById('user-phone').value.trim();
+            var role = document.getElementById('user-role').value;
+            var dept = document.getElementById('user-dept').value;
 
-            if (!name) {{
+            if (!name) {
                 showToast('Введите ФИО', 'error');
                 return;
-            }}
+            }
 
-            try {{
-                let resp;
-                if (id) {{
-                    // Update
-                    resp = await fetch(`/admin/api/users/${{id}}`, {{
+            try {
+                var resp;
+                var body = JSON.stringify({
+                    full_name: name,
+                    telegram_id: tg || null,
+                    phone_number: phone || null,
+                    role: role,
+                    department_name: dept || null
+                });
+
+                if (id) {
+                    resp = await fetch('/admin/api/users/' + id, {
                         method: 'PUT',
-                        headers: {{'Content-Type': 'application/json'}},
-                        body: JSON.stringify({{
-                            full_name: name,
-                            telegram_id: tg || null,
-                            phone_number: phone || null,
-                            role: role,
-                            department_name: dept || null,
-                        }})
-                    }});
-                }} else {{
-                    // Create
-                    resp = await fetch('/admin/api/users', {{
+                        headers: {'Content-Type': 'application/json'},
+                        body: body
+                    });
+                } else {
+                    resp = await fetch('/admin/api/users', {
                         method: 'POST',
-                        headers: {{'Content-Type': 'application/json'}},
-                        body: JSON.stringify({{
-                            full_name: name,
-                            telegram_id: tg || null,
-                            phone_number: phone || null,
-                            role: role,
-                            department_name: dept || null,
-                        }})
-                    }});
-                }}
+                        headers: {'Content-Type': 'application/json'},
+                        body: body
+                    });
+                }
 
-                if (resp.ok) {{
+                if (resp.ok) {
                     showToast(id ? 'Сотрудник обновлён' : 'Сотрудник добавлен', 'success');
                     closeModal('modal-user');
                     loadUsers();
-                }} else {{
-                    const err = await resp.json();
+                } else {
+                    var err = await resp.json();
                     showToast('Ошибка: ' + (err.detail || 'неизвестная'), 'error');
-                }}
-            }} catch(e) {{
+                }
+            } catch(e) {
                 showToast('Ошибка сети', 'error');
-            }}
-        }}
+            }
+        }
 
-        async function saveProject() {{
-            const name = document.getElementById('project-name').value.trim();
-            const address = document.getElementById('project-address').value.trim();
+        async function saveProject() {
+            var name = document.getElementById('project-name').value.trim();
+            var address = document.getElementById('project-address').value.trim();
 
-            if (!name) {{
+            if (!name) {
                 showToast('Введите название объекта', 'error');
                 return;
-            }}
+            }
 
-            try {{
-                const resp = await fetch('/admin/api/projects', {{
+            try {
+                var resp = await fetch('/admin/api/projects', {
                     method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify({{ name, address }})
-                }});
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: name, address: address})
+                });
 
-                if (resp.ok) {{
+                if (resp.ok) {
                     showToast('Объект добавлен', 'success');
                     closeModal('modal-project');
                     loadProjects();
-                }} else {{
+                } else {
                     showToast('Ошибка при добавлении', 'error');
-                }}
-            }} catch(e) {{
+                }
+            } catch(e) {
                 showToast('Ошибка сети', 'error');
-            }}
-        }}
+            }
+        }
 
-        async function deactivateUser(id, name) {{
-            if (!confirm(`Деактивировать сотрудника "${{name}}"?`)) return;
+        async function deactivateUser(id, name) {
+            if (!confirm('Деактивировать сотрудника "' + name + '"?')) return;
 
-            try {{
-                const resp = await fetch(`/admin/api/users/${{id}}`, {{ method: 'DELETE' }});
-                if (resp.ok) {{
+            try {
+                var resp = await fetch('/admin/api/users/' + id, {method: 'DELETE'});
+                if (resp.ok) {
                     showToast('Сотрудник деактивирован', 'success');
                     loadUsers();
-                }}
-            }} catch(e) {{
+                }
+            } catch(e) {
                 showToast('Ошибка', 'error');
-            }}
-        }}
+            }
+        }
 
-        // ============ TOAST ============
-        function showToast(msg, type) {{
-            const toast = document.getElementById('toast');
+        async function doLogout() {
+            await fetch('/admin/api/logout', {method: 'POST'});
+            window.location.href = '/admin';
+        }
+
+        function showToast(msg, type) {
+            var toast = document.getElementById('toast');
             toast.textContent = msg;
             toast.className = 'toast show ' + type;
-            setTimeout(() => toast.classList.remove('show'), 3000);
-        }}
+            setTimeout(function() { toast.classList.remove('show'); }, 3000);
+        }
     </script>
 </body>
-</html>
-"""
+</html>"""
 
+
+# ================================================================
+# ROUTES
+# ================================================================
 
 @admin_router.get("", response_class=HTMLResponse)
-async def get_admin_panel():
-    """Serve the admin panel."""
+async def get_admin_login(request: Request):
+    """Show login page or redirect to panel if already authenticated."""
+    if check_auth(request):
+        return RedirectResponse(url="/admin/panel", status_code=302)
+    return HTMLResponse(content=LOGIN_HTML)
+
+
+@admin_router.get("/panel", response_class=HTMLResponse)
+async def get_admin_panel(request: Request):
+    """Serve the admin panel (protected)."""
+    if not check_auth(request):
+        return RedirectResponse(url="/admin", status_code=302)
     return HTMLResponse(content=ADMIN_HTML)

@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
+from starlette.middleware.sessions import SessionMiddleware
 
 from src.utils.config import settings
 from src.db.session import engine
@@ -29,6 +30,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Session middleware for admin auth
+app.add_middleware(SessionMiddleware, secret_key="a1-system-secret-key-2026-secure")
 
 
 @app.get("/health")

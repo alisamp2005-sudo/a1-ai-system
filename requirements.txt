@@ -37,3 +37,4 @@ python-multipart==0.0.9
 tenacity==8.5.0
 pytz==2024.1
 beautifulsoup4==4.12.3
+itsdangerous>=2.0
