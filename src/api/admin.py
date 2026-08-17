@@ -877,19 +877,33 @@ ADMIN_HTML = """<!DOCTYPE html>
             }
             var html = '';
             users.forEach(function(u) {
+                var safeName = (u.full_name || '').replace(/"/g, '&quot;');
+                var safeTg = (u.telegram_id || '').replace(/"/g, '&quot;');
+                var safePhone = (u.phone_number || '').replace(/"/g, '&quot;');
                 html += '<tr>';
                 html += '<td><b>' + u.full_name + '</b></td>';
                 html += '<td><span class="badge badge-' + u.role + '">' + roleLabel(u.role) + '</span></td>';
-                html += '<td>' + u.department + '</td>';
-                html += '<td>' + u.telegram_id + '</td>';
+                html += '<td>' + (u.department || '-') + '</td>';
+                html += '<td>' + (u.telegram_id || '-') + '</td>';
                 html += '<td><span class="badge badge-' + (u.is_active ? 'active' : 'inactive') + '">' + (u.is_active ? 'Активен' : 'Неактивен') + '</span></td>';
                 html += '<td>';
-                html += '<button class="btn btn-primary btn-sm" onclick="editUser(\'' + u.id + '\',\'' + u.full_name.replace(/'/g, "\\'") + '\',\'' + u.telegram_id + '\',\'' + u.phone_number + '\',\'' + u.role + '\',\'' + u.department + '\')">✏️</button> ';
-                html += '<button class="btn btn-danger btn-sm" onclick="deactivateUser(\'' + u.id + '\',\'' + u.full_name.replace(/'/g, "\\'") + '\')">🗑</button>';
+                html += '<button class="btn btn-primary btn-sm" data-action="edit" data-id="' + u.id + '" data-name="' + safeName + '" data-tg="' + safeTg + '" data-phone="' + safePhone + '" data-role="' + u.role + '" data-dept="' + (u.department || '') + '">✏️</button> ';
+                html += '<button class="btn btn-danger btn-sm" data-action="deactivate" data-id="' + u.id + '" data-name="' + safeName + '">🗑</button>';
                 html += '</td>';
                 html += '</tr>';
             });
             tbody.innerHTML = html;
+            // Attach event listeners
+            tbody.querySelectorAll('[data-action="edit"]').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    editUser(this.dataset.id, this.dataset.name, this.dataset.tg, this.dataset.phone, this.dataset.role, this.dataset.dept);
+                });
+            });
+            tbody.querySelectorAll('[data-action="deactivate"]').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    deactivateUser(this.dataset.id, this.dataset.name);
+                });
+            });
         }
 
         function renderProjects(projects) {
