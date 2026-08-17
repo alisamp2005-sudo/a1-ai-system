@@ -1061,6 +1061,21 @@ ADMIN_HTML = """<!DOCTYPE html>
             toast.className = 'toast show ' + type;
             setTimeout(function() { toast.classList.remove('show'); }, 3000);
         }
+
+        // Make all functions globally accessible for onclick handlers
+        window.showTab = showTab;
+        window.loadUsers = loadUsers;
+        window.loadProjects = loadProjects;
+        window.loadDepartments = loadDepartments;
+        window.openAddUser = openAddUser;
+        window.editUser = editUser;
+        window.openAddProject = openAddProject;
+        window.closeModal = closeModal;
+        window.saveUser = saveUser;
+        window.saveProject = saveProject;
+        window.deactivateUser = deactivateUser;
+        window.doLogout = doLogout;
+        window.showToast = showToast;
     </script>
 </body>
 </html>"""
