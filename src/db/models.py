@@ -26,7 +26,8 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     telegram_id = Column(String, unique=True, nullable=True)
-    phone_number = Column(String(20), unique=True, nullable=False)  # E.164 format
+    telegram_username = Column(String(255), nullable=True)  # @username without @
+    phone_number = Column(String(20), nullable=True)  # E.164 format
     full_name = Column(String(255), nullable=False)
     role = Column(String(50), nullable=False)  # admin, top_manager, manager, worker
     is_active = Column(Boolean, default=True)

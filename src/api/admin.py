@@ -54,6 +54,7 @@ def check_auth(request: Request) -> bool:
 class UserCreate(BaseModel):
     full_name: str
     telegram_id: Optional[str] = None
+    telegram_username: Optional[str] = None
     phone_number: Optional[str] = None
     role: str = "worker"
     department_name: Optional[str] = None
@@ -63,6 +64,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     telegram_id: Optional[str] = None
+    telegram_username: Optional[str] = None
     phone_number: Optional[str] = None
     role: Optional[str] = None
     department_name: Optional[str] = None
@@ -171,8 +173,9 @@ async def api_get_users(request: Request, session: AsyncSession = Depends(get_se
         users_list.append({
             "id": str(u.id),
             "full_name": u.full_name,
-            "telegram_id": u.telegram_id or "—",
-            "phone_number": u.phone_number or "—",
+            "telegram_id": u.telegram_id or "",
+            "telegram_username": getattr(u, 'telegram_username', '') or "",
+            "phone_number": u.phone_number or "",
             "role": u.role,
             "department": dept_name,
             "is_active": u.is_active,
@@ -192,6 +195,7 @@ async def api_create_user(data: UserCreate, request: Request, session: AsyncSess
     user = User(
         full_name=data.full_name,
         telegram_id=data.telegram_id if data.telegram_id else None,
+        telegram_username=data.telegram_username if hasattr(data, 'telegram_username') and data.telegram_username else None,
         phone_number=phone,
         role=data.role,
         is_active=True,
@@ -229,6 +233,8 @@ async def api_update_user(user_id: str, data: UserUpdate, request: Request, sess
         user.full_name = data.full_name
     if data.telegram_id is not None:
         user.telegram_id = data.telegram_id if data.telegram_id else None
+    if hasattr(data, 'telegram_username') and data.telegram_username is not None:
+        user.telegram_username = data.telegram_username if data.telegram_username else None
     if data.phone_number is not None:
         user.phone_number = data.phone_number
     if data.role is not None:
@@ -825,6 +831,10 @@ ADMIN_HTML = """<!DOCTYPE html>
                 <input type="text" id="user-tg" placeholder="123456789">
             </div>
             <div class="form-group">
+                <label>Telegram Username</label>
+                <input type="text" id="user-tg-username" placeholder="@username (без @)">
+            </div>
+            <div class="form-group">
                 <label>Телефон</label>
                 <input type="text" id="user-phone" placeholder="+79001234567">
             </div>
@@ -940,15 +950,19 @@ ADMIN_HTML = """<!DOCTYPE html>
             users.forEach(function(u) {
                 var safeName = (u.full_name || '').replace(/"/g, '&quot;');
                 var safeTg = (u.telegram_id || '').replace(/"/g, '&quot;');
+                var safeTgUser = (u.telegram_username || '').replace(/"/g, '&quot;');
                 var safePhone = (u.phone_number || '').replace(/"/g, '&quot;');
+                var tgDisplay = u.telegram_id || '';
+                if (u.telegram_username) tgDisplay += (tgDisplay ? ' / ' : '') + '@' + u.telegram_username;
+                if (!tgDisplay) tgDisplay = '-';
                 html += '<tr>';
                 html += '<td><b>' + u.full_name + '</b></td>';
                 html += '<td><span class="badge badge-' + u.role + '">' + roleLabel(u.role) + '</span></td>';
                 html += '<td>' + (u.department || '-') + '</td>';
-                html += '<td>' + (u.telegram_id || '-') + '</td>';
+                html += '<td>' + tgDisplay + '</td>';
                 html += '<td><span class="badge badge-' + (u.is_active ? 'active' : 'inactive') + '">' + (u.is_active ? 'Активен' : 'Неактивен') + '</span></td>';
                 html += '<td>';
-                html += '<button class="btn btn-primary btn-sm" data-action="edit" data-id="' + u.id + '" data-name="' + safeName + '" data-tg="' + safeTg + '" data-phone="' + safePhone + '" data-role="' + u.role + '" data-dept="' + (u.department || '') + '">✏️</button> ';
+                html += '<button class="btn btn-primary btn-sm" data-action="edit" data-id="' + u.id + '" data-name="' + safeName + '" data-tg="' + safeTg + '" data-tguser="' + safeTgUser + '" data-phone="' + safePhone + '" data-role="' + u.role + '" data-dept="' + (u.department || '') + '">✏️</button> ';
                 html += '<button class="btn btn-danger btn-sm" data-action="deactivate" data-id="' + u.id + '" data-name="' + safeName + '">🗑</button>';
                 html += '</td>';
                 html += '</tr>';
@@ -957,7 +971,7 @@ ADMIN_HTML = """<!DOCTYPE html>
             // Attach event listeners
             tbody.querySelectorAll('[data-action="edit"]').forEach(function(btn) {
                 btn.addEventListener('click', function() {
-                    editUser(this.dataset.id, this.dataset.name, this.dataset.tg, this.dataset.phone, this.dataset.role, this.dataset.dept);
+                    editUser(this.dataset.id, this.dataset.name, this.dataset.tg, this.dataset.tguser, this.dataset.phone, this.dataset.role, this.dataset.dept);
                 });
             });
             tbody.querySelectorAll('[data-action="deactivate"]').forEach(function(btn) {
@@ -1084,20 +1098,22 @@ ADMIN_HTML = """<!DOCTYPE html>
             document.getElementById('edit-user-id').value = '';
             document.getElementById('user-name').value = '';
             document.getElementById('user-tg').value = '';
+            document.getElementById('user-tg-username').value = '';
             document.getElementById('user-phone').value = '';
             document.getElementById('user-role').value = 'worker';
             document.getElementById('user-dept').value = '';
             document.getElementById('modal-user').classList.add('show');
         }
 
-        function editUser(id, name, tg, phone, role, dept) {
+        function editUser(id, name, tg, tgUser, phone, role, dept) {
             document.getElementById('modal-user-title').textContent = 'Редактировать сотрудника';
             document.getElementById('edit-user-id').value = id;
             document.getElementById('user-name').value = name;
-            document.getElementById('user-tg').value = (tg === '—') ? '' : tg;
-            document.getElementById('user-phone').value = (phone === '—') ? '' : phone;
+            document.getElementById('user-tg').value = (tg === '—' || tg === 'undefined') ? '' : tg;
+            document.getElementById('user-tg-username').value = (tgUser === '—' || tgUser === 'undefined') ? '' : tgUser;
+            document.getElementById('user-phone').value = (phone === '—' || phone === 'undefined') ? '' : phone;
             document.getElementById('user-role').value = role;
-            document.getElementById('user-dept').value = (dept === '—') ? '' : dept;
+            document.getElementById('user-dept').value = (dept === '—' || dept === 'undefined') ? '' : dept;
             document.getElementById('modal-user').classList.add('show');
         }
 
@@ -1115,6 +1131,7 @@ ADMIN_HTML = """<!DOCTYPE html>
             var id = document.getElementById('edit-user-id').value;
             var name = document.getElementById('user-name').value.trim();
             var tg = document.getElementById('user-tg').value.trim();
+            var tgUsername = document.getElementById('user-tg-username').value.trim().replace('@', '');
             var phone = document.getElementById('user-phone').value.trim();
             var role = document.getElementById('user-role').value;
             var dept = document.getElementById('user-dept').value;
@@ -1129,6 +1146,7 @@ ADMIN_HTML = """<!DOCTYPE html>
                 var body = JSON.stringify({
                     full_name: name,
                     telegram_id: tg || null,
+                    telegram_username: tgUsername || null,
                     phone_number: phone || null,
                     role: role,
                     department_name: dept || null
