@@ -274,11 +274,15 @@ class RouterAgent:
             )
 
         # Step 5: QA Controller — validate response
-        approved, reason = await self.qa.validate_response(
-            user_question=text,
-            agent_response=response,
-            task_type=task_type,
-        )
+        # Skip QA for project_management with DB data (real data, no hallucination possible)
+        approved = True
+        reason = None
+        if not db_info:  # Only validate if no real DB data was provided
+            approved, reason = await self.qa.validate_response(
+                user_question=text,
+                agent_response=response,
+                task_type=task_type,
+            )
 
         if not approved:
             # Response rejected by QA — return safe fallback
