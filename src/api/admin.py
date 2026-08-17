@@ -379,9 +379,30 @@ async def api_upload_document(request: Request):
     if not file:
         return {"status": "error", "error": "Файл не выбран"}
 
-    # Save to temp file
+    # Read once, then reject an already indexed copy before costly extraction/embedding.
     content = await file.read()
     ext = os.path.splitext(file.filename)[1].lower()
+    content_hash = hashlib.sha256(content).hexdigest()[:16]
+    registry_path = "/app/data/loaded_documents.json"
+    try:
+        if os.path.exists(registry_path):
+            with open(registry_path, "r") as f:
+                registry = json_lib.load(f)
+        else:
+            registry = {"documents": []}
+    except Exception:
+        registry = {"documents": []}
+
+    duplicate = next(
+        (item for item in registry.get("documents", [])
+         if item.get("content_hash") == content_hash),
+        None,
+    )
+    if duplicate:
+        return {
+            "status": "error",
+            "error": f"Документ уже загружен: {duplicate.get('title', file.filename)}",
+        }
 
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content)
@@ -402,26 +423,19 @@ async def api_upload_document(request: Request):
         if comment:
             title = f"{title} ({comment})"
 
-        chunks_count = await rag_service.add_document(
+        chunks_count = rag_service.add_text_document(
             text=text,
             category=category,
             title=title,
             source=f"admin:{file.filename}",
             project_name=project_name,
+            department=department,
+            comment=comment,
         )
+        if chunks_count == 0:
+            return {"status": "error", "error": "Не удалось загрузить документ в базу знаний"}
 
-        # Register in document registry
-        registry_path = "/app/data/loaded_documents.json"
-        try:
-            if os.path.exists(registry_path):
-                with open(registry_path, "r") as f:
-                    registry = json_lib.load(f)
-            else:
-                registry = {"documents": []}
-        except Exception:
-            registry = {"documents": []}
-
-        content_hash = hashlib.sha256(content).hexdigest()[:16]
+        # Register in the document registry loaded before text extraction.
         from datetime import datetime
         registry["documents"].append({
             "filename": file.filename,

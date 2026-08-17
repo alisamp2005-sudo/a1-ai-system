@@ -35,7 +35,9 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 CHROMA_URL = os.getenv("CHROMA_URL", "http://localhost:8000")
 EMBED_MODEL = "nomic-embed-text"
 COLLECTION_NAME = "a1_knowledge_base"
-DOCS_DIR = Path.home() / "a1-ai-system" / "data" / "rag_documents"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DOCS_DIR = PROJECT_ROOT / "data" / "rag_documents"
+DOCUMENT_REGISTRY_PATH = PROJECT_ROOT / "data" / "loaded_documents.json"
 CHUNK_SIZE = 200  # слов в одном фрагменте (nomic-embed-text лимит ~2048 токенов)
 CHUNK_OVERLAP = 30  # слов перекрытия
 
@@ -469,6 +471,42 @@ def check_services():
     return True
 
 
+def register_loaded_document(doc: Dict, chunks: int, source: str) -> None:
+    """Upsert one bootstrap document in the registry shown by the admin panel."""
+    if chunks <= 0:
+        return
+
+    DOCUMENT_REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        registry = json.loads(DOCUMENT_REGISTRY_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        registry = {"documents": []}
+
+    documents = registry.setdefault("documents", [])
+    filename = f"{doc['id']}.txt"
+    # A rerun replaces the bootstrap record instead of accumulating duplicates.
+    documents[:] = [
+        item for item in documents
+        if not (item.get("source") == "bootstrap" and item.get("filename") == filename)
+    ]
+    documents.append({
+        "filename": filename,
+        "title": doc["title"],
+        "category": doc["category"],
+        "chunks": chunks,
+        "project_name": "",
+        "department": "",
+        "comment": "Нормативный документ, загружен стартовым скриптом",
+        "source": "bootstrap",
+        "loaded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "loaded_by": "load_rag_documents.py",
+    })
+    DOCUMENT_REGISTRY_PATH.write_text(
+        json.dumps(registry, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def get_embedding(text: str) -> List[float]:
     """Get embedding vector from Ollama. Truncates text to fit context window."""
     # nomic-embed-text has ~2048 token limit, ~4 chars per token on average
@@ -560,9 +598,10 @@ def create_collection():
 
 
 def load_chunks_to_chroma(collection, chunks: List[str], doc_meta: Dict):
-    """Load text chunks with embeddings into ChromaDB."""
+    """Load text chunks with embeddings into ChromaDB and return saved count."""
     doc_id = doc_meta["id"]
     batch_size = 10
+    saved_chunks = 0
 
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i+batch_size]
@@ -591,8 +630,9 @@ def load_chunks_to_chroma(collection, chunks: List[str], doc_meta: Dict):
                 documents=batch[:len(embeddings)],
                 metadatas=metadatas,
             )
+            saved_chunks += len(embeddings)
 
-    return len(chunks)
+    return saved_chunks
 
 
 # ================================================================
@@ -630,6 +670,7 @@ def main():
         chunks = chunk_text(doc["text"])
         loaded = load_chunks_to_chroma(collection, chunks, doc)
         total_chunks += loaded
+        register_loaded_document(doc, loaded, source="bootstrap")
         logger.info(f"  ✅ {doc['title'][:50]}: {loaded} фрагментов")
 
     print()
@@ -658,6 +699,7 @@ def main():
         if chunks:
             loaded = load_chunks_to_chroma(collection, chunks, doc)
             total_chunks += loaded
+            register_loaded_document(doc, loaded, source="bootstrap")
             logger.info(f"  ✅ {doc['title'][:50]}: {loaded} фрагментов")
 
         time.sleep(1)  # Пауза между запросами

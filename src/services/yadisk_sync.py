@@ -94,13 +94,17 @@ def _map_folder_to_project(folder_name: str) -> str:
         'Ленская 15': 'Ленская 15',
         'Мосводосток Дмитровское шоссе': 'Мосводосток Дмитровское шоссе',
         'Остров-8': 'Остров-8',
+        'Остров- 8': 'Остров-8',
         'ППК ВСК (Ульяновск.Поливно)': 'ППК ВСК (Ульяновск, Поливно)',
+        'ППК ВСК  ( Ульяновск.Поливно)': 'ППК ВСК (Ульяновск, Поливно)',
         'ППК ВСК (Чебаркуль)': 'ППК ВСК (Чебаркуль)',
+        'ППК ВСК  (Чебаркуль)': 'ППК ВСК (Чебаркуль)',
         'Хранилища': 'Хранилища',
         'реновация': 'Реновация (Михалковская)',
         'ул.Житная. ФБУ РФЦСЭ при Минюсте России': 'ул. Житная (ФБУ РФЦСЭ при Минюсте)',
     }
-    return mapping.get(folder_name, folder_name)
+    normalized_name = folder_name.strip()
+    return mapping.get(normalized_name, normalized_name)
 
 
 def _guess_category(filename: str) -> str:
@@ -267,13 +271,15 @@ async def sync_yadisk():
                     category = _guess_category(file_name)
                     title = os.path.splitext(file_name)[0]
 
-                    chunks_count = await rag_service.add_document(
+                    chunks_count = rag_service.add_text_document(
                         text=text,
                         category=category,
                         title=title,
                         source=f"yadisk:{item_name}/{file_name}",
                         project_name=project_name,
                     )
+                    if chunks_count == 0:
+                        raise RuntimeError("Не удалось загрузить ни одного фрагмента в RAG")
 
                     # Register
                     _register_document(
@@ -340,13 +346,15 @@ async def sync_yadisk():
                         category = _guess_category(file_name)
                         title = os.path.splitext(file_name)[0]
 
-                        chunks_count = await rag_service.add_document(
+                        chunks_count = rag_service.add_text_document(
                             text=text,
                             category=category,
                             title=title,
                             source=f"yadisk:{file_name}",
                             project_name="Общие документы",
                         )
+                        if chunks_count == 0:
+                            raise RuntimeError("Не удалось загрузить ни одного фрагмента в RAG")
 
                         _register_document(
                             filename=file_name,

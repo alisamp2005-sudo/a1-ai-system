@@ -32,7 +32,9 @@ services:
       retries: 5
 
   chromadb:
-    image: chromadb/chroma:latest
+    # The server version is intentionally pinned to the same 0.5.x line as
+    # the Python client; `latest` changed the tenant API and broke RAG access.
+    image: chromadb/chroma:0.5.5
     container_name: a1_chromadb
     restart: unless-stopped
     ports:
