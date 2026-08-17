@@ -287,12 +287,13 @@ async def handle_doc_save(callback: CallbackQuery, state: FSMContext):
         user_name = callback.from_user.full_name or str(callback.from_user.id)
         _register_document(filename, title, category, content_hash, chunks_count, user_name)
 
+        cat_label = DOCUMENT_CATEGORIES.get(category, 'Прочее')
         await callback.message.edit_text(
             f"\u2705 <b>\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d \u0432 \u0431\u0430\u0437\u0443 \u0437\u043d\u0430\u043d\u0438\u0439!</b>\n\n"
             f"\ud83d\udccc {title}\n"
-            f"\ud83d\udcc1 \u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f: {DOCUMENT_CATEGORIES.get(category, '\u041f\u0440\u043e\u0447\u0435\u0435')}\n"
+            f"\ud83d\udcc1 \u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f: {cat_label}\n"
             f"\ud83e\udde9 \u0424\u0440\u0430\u0433\u043c\u0435\u043d\u0442\u043e\u0432: {chunks_count}\n\n"
-            f"\u0422\u0435\u043f\u0435\u0440\u044c AI-\u0430\u0433\u0435\u043d\u0442\u044b \u0431\u0443\u0434\u0443\u0442 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c \u044d\u0442\u043e\u0442 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0434\u043b\u044f \u043e\u0442\u0432\u0435\u0442\u043e\u0432.",
+            "\u0422\u0435\u043f\u0435\u0440\u044c AI-\u0430\u0433\u0435\u043d\u0442\u044b \u0431\u0443\u0434\u0443\u0442 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c \u044d\u0442\u043e\u0442 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0434\u043b\u044f \u043e\u0442\u0432\u0435\u0442\u043e\u0432.",
             parse_mode="HTML",
         )
     except Exception as e:
