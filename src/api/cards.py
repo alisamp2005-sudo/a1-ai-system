@@ -256,8 +256,11 @@ USER_CARD_HTML = """
 # ================================================================
 
 @cards_router.get("/object/{name}", response_class=HTMLResponse)
-async def get_object_card(name: str, session: AsyncSession = Depends(get_session)):
-    """Show object (project) card."""
+async def get_object_card(name: str, tg_id: str = "", session: AsyncSession = Depends(get_session)):
+    """Show object (project) card. Pass ?tg_id=123 to check role for documents."""
+    import json as json_lib
+    import os
+
     # Search by name (case-insensitive)
     result = await session.execute(
         select(Project).where(Project.name.ilike(f"%{name}%"))
@@ -269,12 +272,58 @@ async def get_object_card(name: str, session: AsyncSession = Depends(get_session
 
     status_map = {"active": "Активен", "completed": "Завершён", "paused": "Приостановлен"}
 
+    # Check user role for document access
+    show_documents = False
+    if tg_id:
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == tg_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if user and user.role in ('admin', 'top_manager'):
+            show_documents = True
+
+    # Get documents for this project
+    documents_html = ""
+    if show_documents:
+        docs = []
+        registry_path = "/app/data/loaded_documents.json"
+        if os.path.exists(registry_path):
+            try:
+                with open(registry_path, "r") as f:
+                    registry = json_lib.load(f)
+                for doc in registry.get("documents", []):
+                    if doc.get("project_name", "").lower() in project.name.lower() or \
+                       project.name.lower() in doc.get("project_name", "").lower():
+                        docs.append(doc)
+            except Exception:
+                pass
+
+        if docs:
+            documents_html = '<div class="section-title">📂 Документы</div><div class="card">'
+            for doc in docs:
+                cat_icons = {
+                    'contract': '📄', 'act': '📋', 'estimate': '💰',
+                    'regulation': '📖', 'safety': '🦺', 'other': '📁'
+                }
+                icon = cat_icons.get(doc.get('category', ''), '📁')
+                date = (doc.get('loaded_at', '') or '')[:10]
+                documents_html += f'<div class="field"><div class="label">{icon} {doc.get("category", "").upper()} • {date}</div>'
+                documents_html += f'<div class="value">{doc.get("title", doc.get("filename", ""))}</div></div>'
+            documents_html += '</div>'
+        else:
+            documents_html = '<div class="section-title">📂 Документы</div><div class="card"><div class="field"><div class="value">Нет загруженных документов</div></div></div>'
+
     html = OBJECT_CARD_HTML.format(
         name=project.name,
         address=project.address or "Адрес не указан",
         status=project.status,
         status_ru=status_map.get(project.status, project.status),
     )
+
+    # Inject documents section before closing script
+    if documents_html:
+        html = html.replace('</body>', documents_html + '</body>')
+
     return HTMLResponse(content=html)
 
 

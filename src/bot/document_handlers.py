@@ -68,7 +68,7 @@ def _check_duplicate(filename: str, content_hash: str) -> Optional[dict]:
     return None
 
 
-def _register_document(filename: str, title: str, category: str, content_hash: str, chunks: int, user: str):
+def _register_document(filename: str, title: str, category: str, content_hash: str, chunks: int, user: str, project_name: str = ""):
     """Register a loaded document."""
     registry = _load_registry()
     registry["documents"].append({
@@ -77,6 +77,8 @@ def _register_document(filename: str, title: str, category: str, content_hash: s
         "category": category,
         "content_hash": content_hash,
         "chunks": chunks,
+        "project_name": project_name,
+        "source": "telegram",
         "loaded_at": datetime.now().isoformat(),
         "loaded_by": user,
     })

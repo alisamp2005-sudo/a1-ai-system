@@ -31,6 +31,10 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.digest.send_morning_digest",
         "schedule": crontab(hour=8, minute=0),  # 08:00 Moscow time
     },
+    "yadisk-sync-daily-06-00": {
+        "task": "sync_yadisk",
+        "schedule": crontab(hour=6, minute=0),  # 06:00 Moscow time
+    },
 }
 
 # Auto-discover tasks
