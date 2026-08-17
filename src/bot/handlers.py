@@ -12,6 +12,8 @@ from aiogram.filters import CommandStart, Command
 from src.services.ollama_client import OllamaClient
 from src.services.router_agent import RouterAgent
 from src.services.inline_links import build_inline_keyboard
+from src.bot.document_delivery_handlers import can_access_documents
+from src.services.document_storage import build_delivery_keyboard, merge_keyboards
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -212,8 +214,11 @@ async def handle_text_message(message: Message):
             user_name=user_name,
         )
 
-        # Check for entity links (objects, people) to add inline buttons
+        # Existing entity controls are preserved. Original-document controls are
+        # added only for roles verified from the current Telegram account.
         inline_kb = build_inline_keyboard(response)
+        if await can_access_documents(user_id):
+            inline_kb = merge_keyboards(inline_kb, build_delivery_keyboard(response))
 
         if inline_kb:
             # Send with reply keyboard + inline buttons below

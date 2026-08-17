@@ -15,6 +15,7 @@ import requests
 
 from src.services.document_processor import extract_text, is_supported
 from src.services.rag_service import rag_service
+from src.services.document_storage import save_original
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,9 @@ def _save_sync_registry(registry: dict):
 
 
 def _register_document(filename: str, title: str, category: str, content_hash: str,
-                       chunks: int, project_name: str, source: str = "yadisk"):
-    """Register document in the main registry with project link."""
+                       chunks: int, project_name: str, source: str = "yadisk",
+                       storage_path: str = "", rag_source: str = ""):
+    """Register document in the main registry with project link and original path."""
     os.makedirs(os.path.dirname(DOCUMENT_REGISTRY_PATH), exist_ok=True)
     try:
         if os.path.exists(DOCUMENT_REGISTRY_PATH):
@@ -59,12 +61,15 @@ def _register_document(filename: str, title: str, category: str, content_hash: s
         registry = {"documents": []}
 
     registry["documents"].append({
+        "document_id": content_hash,
         "filename": filename,
         "title": title,
         "category": category,
         "content_hash": content_hash,
         "chunks": chunks,
         "project_name": project_name,
+        "storage_path": storage_path,
+        "rag_source": rag_source,
         "source": source,
         "loaded_at": datetime.now().isoformat(),
         "loaded_by": "Яндекс.Диск (авто)",
@@ -247,8 +252,9 @@ async def sync_yadisk():
                     stats["skipped"] += 1
                     continue
 
-                # Save to temp file and extract text
+                # Preserve original and extract text from a separate temp file.
                 try:
+                    storage_path = save_original(content, file_name, file_hash)
                     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
                         tmp.write(content)
                         tmp_path = tmp.name
@@ -264,6 +270,8 @@ async def sync_yadisk():
 
                     if not text or len(text.strip()) < 50:
                         logger.warning(f"  No text extracted from {file_name}")
+                        if os.path.exists(storage_path):
+                            os.unlink(storage_path)
                         stats["errors"] += 1
                         continue
 
@@ -290,6 +298,8 @@ async def sync_yadisk():
                         chunks=chunks_count,
                         project_name=project_name,
                         source="yadisk",
+                        storage_path=storage_path,
+                        rag_source=f"yadisk:{item_name}/{file_name}",
                     )
 
                     # Update sync registry
@@ -305,8 +315,10 @@ async def sync_yadisk():
                 except Exception as e:
                     logger.error(f"  Error processing {file_name}: {e}")
                     stats["errors"] += 1
-                    if os.path.exists(tmp_path):
+                    if 'tmp_path' in locals() and os.path.exists(tmp_path):
                         os.unlink(tmp_path)
+                    if 'storage_path' in locals() and os.path.exists(storage_path):
+                        os.unlink(storage_path)
 
         elif item_type == "file":
             # Top-level file (e.g., Реестр контрактов)
@@ -329,6 +341,7 @@ async def sync_yadisk():
             if content:
                 file_hash = _get_file_hash(content)
                 try:
+                    storage_path = save_original(content, file_name, file_hash)
                     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
                         tmp.write(content)
                         tmp_path = tmp.name
@@ -364,6 +377,8 @@ async def sync_yadisk():
                             chunks=chunks_count,
                             project_name="Общие документы",
                             source="yadisk",
+                            storage_path=storage_path,
+                            rag_source=f"yadisk:{file_name}",
                         )
 
                         synced_files[sync_key] = {
@@ -372,9 +387,17 @@ async def sync_yadisk():
                             "synced_at": datetime.now().isoformat(),
                         }
                         stats["new"] += 1
+                    else:
+                        if os.path.exists(storage_path):
+                            os.unlink(storage_path)
+                        stats["errors"] += 1
                 except Exception as e:
                     logger.error(f"Error processing {file_name}: {e}")
                     stats["errors"] += 1
+                    if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                    if 'storage_path' in locals() and os.path.exists(storage_path):
+                        os.unlink(storage_path)
 
     # Save sync state
     sync_registry["synced_files"] = synced_files

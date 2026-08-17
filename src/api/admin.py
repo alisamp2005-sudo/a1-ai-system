@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_session
 from src.db.models import User, Department, UserDepartment, Project
+from src.services.document_storage import save_original
 
 logger = logging.getLogger(__name__)
 admin_router = APIRouter(prefix="/admin")
@@ -404,6 +405,7 @@ async def api_upload_document(request: Request):
             "error": f"Документ уже загружен: {duplicate.get('title', file.filename)}",
         }
 
+    storage_path = save_original(content, file.filename, content_hash)
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
@@ -416,6 +418,8 @@ async def api_upload_document(request: Request):
         os.unlink(tmp_path)
 
         if not text or len(text.strip()) < 20:
+            if os.path.exists(storage_path):
+                os.unlink(storage_path)
             return {"status": "error", "error": "Не удалось извлечь текст из файла"}
 
         # Load into RAG
@@ -438,6 +442,7 @@ async def api_upload_document(request: Request):
         # Register in the document registry loaded before text extraction.
         from datetime import datetime
         registry["documents"].append({
+            "document_id": content_hash,
             "filename": file.filename,
             "title": title,
             "category": category,
@@ -446,6 +451,8 @@ async def api_upload_document(request: Request):
             "project_name": project_name,
             "department": department,
             "comment": comment,
+            "storage_path": storage_path,
+            "rag_source": f"admin:{file.filename}",
             "source": "admin",
             "loaded_at": datetime.now().isoformat(),
             "loaded_by": "Админ",
@@ -460,6 +467,8 @@ async def api_upload_document(request: Request):
     except Exception as e:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+        if 'storage_path' in locals() and os.path.exists(storage_path):
+            os.unlink(storage_path)
         return {"status": "error", "error": str(e)}
 
 

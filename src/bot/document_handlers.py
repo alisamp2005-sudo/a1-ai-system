@@ -14,6 +14,7 @@ import os
 import json
 import hashlib
 import tempfile
+from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
@@ -27,6 +28,7 @@ from src.services.document_processor import (
 )
 from src.services.ollama_client import OllamaClient
 from src.services.rag_service import rag_service
+from src.services.document_storage import content_hash, save_original
 
 # ============================================================
 # DOCUMENT REGISTRY — tracks what's been loaded to prevent duplicates
@@ -68,16 +70,27 @@ def _check_duplicate(filename: str, content_hash: str) -> Optional[dict]:
     return None
 
 
-def _register_document(filename: str, title: str, category: str, content_hash: str, chunks: int, user: str, project_name: str = ""):
-    """Register a loaded document."""
+def _register_document(
+    filename: str,
+    title: str,
+    category: str,
+    file_hash: str,
+    chunks: int,
+    user: str,
+    project_name: str = "",
+    storage_path: str = "",
+):
+    """Register a loaded document, including the preserved original for delivery."""
     registry = _load_registry()
     registry["documents"].append({
+        "document_id": file_hash,
         "filename": filename,
         "title": title,
         "category": category,
-        "content_hash": content_hash,
+        "content_hash": file_hash,
         "chunks": chunks,
         "project_name": project_name,
+        "storage_path": storage_path,
         "source": "telegram",
         "loaded_at": datetime.now().isoformat(),
         "loaded_by": user,
@@ -172,13 +185,21 @@ async def handle_document(message: Message, state: FSMContext):
             await bot.download_file(file.file_path, tmp)
             tmp_path = tmp.name
 
+        # Preserve the original file before text extraction. It is sent back only
+        # after role verification when an authorized user requests it.
+        raw_content = Path(tmp_path).read_bytes()
+        file_hash = content_hash(raw_content)
+        storage_path = save_original(raw_content, filename, file_hash)
+
         # Extract text
         text, fmt = await extract_text(tmp_path)
 
-        # Clean up temp file
+        # Clean up extraction temp file
         os.unlink(tmp_path)
 
         if not text or len(text.strip()) < 20:
+            if os.path.exists(storage_path):
+                os.unlink(storage_path)
             await status_msg.edit_text(
                 f"📄 Файл: <b>{filename}</b>\n\n"
                 f"⚠️ Не удалось извлечь текст из файла. "
@@ -214,6 +235,8 @@ async def handle_document(message: Message, state: FSMContext):
             title=title,
             description=description,
             user_caption=caption,
+            storage_path=storage_path,
+            file_hash=file_hash,
         )
 
         # Show classification and ask for confirmation
@@ -259,6 +282,8 @@ async def handle_doc_save(callback: CallbackQuery, state: FSMContext):
     category = data["category"]
     title = data["title"]
     filename = data["filename"]
+    storage_path = data.get("storage_path", "")
+    file_hash = data.get("file_hash") or _get_content_hash(text)
 
     await callback.answer("Сохраняю...")
     await callback.message.edit_text(
@@ -267,9 +292,10 @@ async def handle_doc_save(callback: CallbackQuery, state: FSMContext):
     )
 
     # Check for duplicates
-    content_hash = _get_content_hash(text)
-    existing = _check_duplicate(filename, content_hash)
+    existing = _check_duplicate(filename, file_hash)
     if existing:
+        if storage_path and os.path.exists(storage_path):
+            os.unlink(storage_path)
         await callback.message.edit_text(
             f"\u26a0\ufe0f <b>\u0414\u0443\u0431\u043b\u0438\u043a\u0430\u0442!</b>\n\n"
             f"\u042d\u0442\u043e\u0442 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0443\u0436\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d \u0432 \u0431\u0430\u0437\u0443 \u0437\u043d\u0430\u043d\u0438\u0439:\n"
@@ -287,7 +313,15 @@ async def handle_doc_save(callback: CallbackQuery, state: FSMContext):
 
         # Register in loaded documents list
         user_name = callback.from_user.full_name or str(callback.from_user.id)
-        _register_document(filename, title, category, content_hash, chunks_count, user_name)
+        _register_document(
+            filename=filename,
+            title=title,
+            category=category,
+            file_hash=file_hash,
+            chunks=chunks_count,
+            user=user_name,
+            storage_path=storage_path,
+        )
 
         cat_label = DOCUMENT_CATEGORIES.get(category, 'Прочее')
         await callback.message.edit_text(
@@ -300,6 +334,8 @@ async def handle_doc_save(callback: CallbackQuery, state: FSMContext):
         )
     except Exception as e:
         logger.error(f"RAG load error: {e}")
+        if storage_path and os.path.exists(storage_path):
+            os.unlink(storage_path)
         await callback.message.edit_text(
             f"\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0438: {str(e)[:200]}",
         )
@@ -404,7 +440,11 @@ async def handle_category_select(callback: CallbackQuery, state: FSMContext):
 
 @document_router.callback_query(F.data == "doc_cancel")
 async def handle_doc_cancel(callback: CallbackQuery, state: FSMContext):
-    """Cancel document upload."""
+    """Cancel document upload and remove its staged original."""
+    data = await state.get_data()
+    storage_path = data.get("storage_path", "")
+    if storage_path and os.path.exists(storage_path):
+        os.unlink(storage_path)
     await state.clear()
     await callback.answer("Отменено")
     await callback.message.edit_text("❌ Загрузка документа отменена.")
