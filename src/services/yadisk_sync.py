@@ -205,7 +205,8 @@ async def sync_yadisk():
             project_name = _map_folder_to_project(item_name)
             logger.info(f"Scanning folder: {item_name} → project: {project_name}")
 
-            folder_items = list_public_folder(YADISK_PUBLIC_URL, path=f"/{item_name}")
+            folder_path = item.get("path", f"/{item_name}")
+            folder_items = list_public_folder(YADISK_PUBLIC_URL, path=folder_path)
 
             for file_item in folder_items:
                 file_name = file_item.get("name", "")
@@ -227,7 +228,8 @@ async def sync_yadisk():
 
                 # Download and process
                 logger.info(f"  Downloading: {file_name} ({file_size} bytes)")
-                content = download_public_file(YADISK_PUBLIC_URL, f"/{item_name}/{file_name}")
+                file_dl_path = file_item.get("path", f"/{item_name}/{file_name}")
+                content = download_public_file(YADISK_PUBLIC_URL, file_dl_path)
 
                 if not content:
                     stats["errors"] += 1
@@ -249,6 +251,12 @@ async def sync_yadisk():
 
                     text = await extract_text(tmp_path)
                     os.unlink(tmp_path)
+
+                    # Handle tuple return from extract_text
+                    if isinstance(text, tuple):
+                        text = text[0] if text else ""
+                    if not text:
+                        text = ""
 
                     if not text or len(text.strip()) < 50:
                         logger.warning(f"  No text extracted from {file_name}")
@@ -309,7 +317,8 @@ async def sync_yadisk():
                     continue
 
             logger.info(f"Downloading top-level: {file_name}")
-            content = download_public_file(YADISK_PUBLIC_URL, f"/{file_name}")
+            file_dl_path = item.get("path", f"/{file_name}")
+            content = download_public_file(YADISK_PUBLIC_URL, file_dl_path)
 
             if content:
                 file_hash = _get_file_hash(content)
@@ -320,6 +329,12 @@ async def sync_yadisk():
 
                     text = await extract_text(tmp_path)
                     os.unlink(tmp_path)
+
+                    # Handle tuple return
+                    if isinstance(text, tuple):
+                        text = text[0] if text else ""
+                    if not text:
+                        text = ""
 
                     if text and len(text.strip()) >= 50:
                         category = _guess_category(file_name)
