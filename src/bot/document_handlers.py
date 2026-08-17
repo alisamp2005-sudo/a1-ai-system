@@ -12,7 +12,9 @@ Document Upload Handlers — обработка файлов для загруз
 import logging
 import os
 import json
+import hashlib
 import tempfile
+from datetime import datetime
 from typing import Optional
 
 from aiogram import Router, F
@@ -25,6 +27,60 @@ from src.services.document_processor import (
 )
 from src.services.ollama_client import OllamaClient
 from src.services.rag_service import rag_service
+
+# ============================================================
+# DOCUMENT REGISTRY — tracks what's been loaded to prevent duplicates
+# ============================================================
+DOCUMENT_REGISTRY_PATH = "/app/data/loaded_documents.json"
+
+
+def _load_registry() -> dict:
+    """Load the document registry from disk."""
+    try:
+        if os.path.exists(DOCUMENT_REGISTRY_PATH):
+            with open(DOCUMENT_REGISTRY_PATH, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"documents": []}
+
+
+def _save_registry(registry: dict):
+    """Save the document registry to disk."""
+    os.makedirs(os.path.dirname(DOCUMENT_REGISTRY_PATH), exist_ok=True)
+    with open(DOCUMENT_REGISTRY_PATH, "w") as f:
+        json.dump(registry, f, ensure_ascii=False, indent=2)
+
+
+def _get_content_hash(text: str) -> str:
+    """Get SHA256 hash of document content."""
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _check_duplicate(filename: str, content_hash: str) -> Optional[dict]:
+    """Check if document is already loaded. Returns existing entry or None."""
+    registry = _load_registry()
+    for doc in registry["documents"]:
+        if doc.get("content_hash") == content_hash:
+            return doc
+        if doc.get("filename") == filename:
+            return doc
+    return None
+
+
+def _register_document(filename: str, title: str, category: str, content_hash: str, chunks: int, user: str):
+    """Register a loaded document."""
+    registry = _load_registry()
+    registry["documents"].append({
+        "filename": filename,
+        "title": title,
+        "category": category,
+        "content_hash": content_hash,
+        "chunks": chunks,
+        "loaded_at": datetime.now().isoformat(),
+        "loaded_by": user,
+    })
+    _save_registry(registry)
 
 logger = logging.getLogger(__name__)
 
@@ -208,22 +264,41 @@ async def handle_doc_save(callback: CallbackQuery, state: FSMContext):
         f"📌 {title}",
     )
 
+    # Check for duplicates
+    content_hash = _get_content_hash(text)
+    existing = _check_duplicate(filename, content_hash)
+    if existing:
+        await callback.message.edit_text(
+            f"\u26a0\ufe0f <b>\u0414\u0443\u0431\u043b\u0438\u043a\u0430\u0442!</b>\n\n"
+            f"\u042d\u0442\u043e\u0442 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0443\u0436\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d \u0432 \u0431\u0430\u0437\u0443 \u0437\u043d\u0430\u043d\u0438\u0439:\n"
+            f"\ud83d\udccc {existing.get('title', filename)}\n"
+            f"\ud83d\udcc5 \u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043d: {existing.get('loaded_at', '?')[:10]}\n\n"
+            f"\u041f\u043e\u0432\u0442\u043e\u0440\u043d\u0430\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043d\u0435 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f.",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
+
     # Load into ChromaDB
     try:
         chunks_count = await _load_to_rag(text, category, title, filename)
 
+        # Register in loaded documents list
+        user_name = callback.from_user.full_name or str(callback.from_user.id)
+        _register_document(filename, title, category, content_hash, chunks_count, user_name)
+
         await callback.message.edit_text(
-            f"✅ <b>Документ сохранён в базу знаний!</b>\n\n"
-            f"📌 {title}\n"
-            f"📁 Категория: {DOCUMENT_CATEGORIES.get(category, 'Прочее')}\n"
-            f"🧩 Фрагментов: {chunks_count}\n\n"
-            f"Теперь AI-агенты будут использовать этот документ для ответов.",
+            f"\u2705 <b>\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d \u0432 \u0431\u0430\u0437\u0443 \u0437\u043d\u0430\u043d\u0438\u0439!</b>\n\n"
+            f"\ud83d\udccc {title}\n"
+            f"\ud83d\udcc1 \u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f: {DOCUMENT_CATEGORIES.get(category, '\u041f\u0440\u043e\u0447\u0435\u0435')}\n"
+            f"\ud83e\udde9 \u0424\u0440\u0430\u0433\u043c\u0435\u043d\u0442\u043e\u0432: {chunks_count}\n\n"
+            f"\u0422\u0435\u043f\u0435\u0440\u044c AI-\u0430\u0433\u0435\u043d\u0442\u044b \u0431\u0443\u0434\u0443\u0442 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c \u044d\u0442\u043e\u0442 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442 \u0434\u043b\u044f \u043e\u0442\u0432\u0435\u0442\u043e\u0432.",
             parse_mode="HTML",
         )
     except Exception as e:
         logger.error(f"RAG load error: {e}")
         await callback.message.edit_text(
-            f"❌ Ошибка при сохранении: {str(e)[:200]}",
+            f"\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0438: {str(e)[:200]}",
         )
 
     await state.clear()

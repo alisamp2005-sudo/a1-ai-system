@@ -5,10 +5,13 @@ Main entry point for the bot.
 
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 
 from src.bot.handlers import router as handlers_router
 from src.bot.task_handlers import task_router
@@ -29,9 +32,20 @@ async def main():
         logger.error("TELEGRAM_TOKEN is not set in .env!")
         return
 
+    # Use local Telegram Bot API server if available (supports files up to 2GB)
+    local_api_url = os.getenv("TELEGRAM_LOCAL_API_URL", "")
+    session = None
+    if local_api_url:
+        local_server = TelegramAPIServer.from_base(local_api_url)
+        session = AiohttpSession(api=local_server)
+        logger.info(f"Using LOCAL Telegram Bot API: {local_api_url}")
+    else:
+        logger.info("Using standard Telegram Bot API (file limit: 20MB)")
+
     bot = Bot(
         token=settings.TELEGRAM_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=session,
     )
     dp = Dispatcher()
 
