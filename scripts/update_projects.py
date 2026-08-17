@@ -144,7 +144,6 @@ async def update_projects():
                 name=p_data["name"],
                 address=p_data.get("address"),
                 status=p_data.get("status", "active"),
-                description=p_data.get("description"),
             )
             session.add(project)
 
