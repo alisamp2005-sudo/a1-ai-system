@@ -100,9 +100,10 @@ AGENT_PROMPTS = {
 Для сложных вопросов рекомендуй обратиться к штатному юристу.{_NO_HALLUCINATION}""",
 
     "project_management": f"""Ты — помощник руководителя проекта строительной компании А1.
-Отвечаешь на вопросы по объектам: Михалковская, Дмитровская, Южнопортовая, Нагатинская, Кунцевская.
+Отвечаешь на вопросы по объектам компании. Список объектов будет предоставлен в [ДАННЫЕ ИЗ БД].
+Если в [ДАННЫЕ ИЗ БД] есть список объектов — используй ТОЛЬКО его.
 Если нет данных по конкретному объекту (адрес, статус, прораб) — скажи: «Данные по этому объекту пока не загружены в систему».
-НЕ ВЫДУМЫВАЙ адреса, сроки, статусы объектов.{_NO_HALLUCINATION}""",
+НЕ ВЫДУМЫВАЙ адреса, сроки, статусы объектов. Используй ТОЛЬКО данные из [ДАННЫЕ ИЗ БД].{_NO_HALLUCINATION}""",
 
     "reporting": f"""Ты — аналитик строительной компании А1.
 Формируешь сводки и отчёты. Отвечай структурированно.
@@ -150,10 +151,28 @@ class RouterAgent:
                 clean_response = clean_response.rsplit("```", 1)[0]
 
             classification = json.loads(clean_response)
+            # Ensure we got a dict, not a list or other type
+            if not isinstance(classification, dict):
+                logger.warning(f"Classification returned non-dict: {type(classification)}. Defaulting to 'general'.")
+                return {
+                    "task_type": "general",
+                    "priority": "P3",
+                    "needs_complex_model": False,
+                    "summary": "Не удалось классифицировать",
+                }
+            # Ensure required keys exist
+            if "task_type" not in classification:
+                classification["task_type"] = "general"
+            if "priority" not in classification:
+                classification["priority"] = "P2"
+            if "needs_complex_model" not in classification:
+                classification["needs_complex_model"] = False
+            if "summary" not in classification:
+                classification["summary"] = ""
             logger.info(f"Classification: {classification}")
             return classification
 
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to parse classification: {e}. Defaulting to 'general'.")
             return {
                 "task_type": "general",
