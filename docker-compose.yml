@@ -64,6 +64,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./config:/app/config
+      - ./data:/app/data
 
   telegram_bot_api:
     image: aiogram/telegram-bot-api:latest
@@ -121,6 +122,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./config:/app/config
+      - ./data:/app/data
 
   celery_beat:
     build:
