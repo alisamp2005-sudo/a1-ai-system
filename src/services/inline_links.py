@@ -13,11 +13,24 @@ logger = logging.getLogger(__name__)
 # Base URL for Mini App cards
 MINIAPP_BASE_URL = "https://ai.bruceli.ru/miniapp"
 
-# Known objects (will be loaded from DB in future)
+# Known objects — real company objects
 KNOWN_OBJECTS = [
-    "Михалковская", "Дмитровская", "Южнопортовая",
-    "Нагатинская", "Кунцевская", "Хорошевское",
-    "Варшавское", "Ленинградский", "Рязанский",
+    "Дом юстиции",
+    "ГАЗСТРОЙПРОМ",
+    "ЩЛЗ Лифты",
+    "ЩЛЗ Стройка",
+    "Алые паруса",
+    "ДРОЗ",
+    "ЖК ЛДМ",
+    "Кубинка",
+    "Ленская 15",
+    "Мосводосток",
+    "Остров-8",
+    "ППК ВСК",
+    "Хранилища",
+    "Реновация",
+    "Михалковская",
+    "Житная",
 ]
 
 # Known people (will be loaded from DB in future)
@@ -29,9 +42,9 @@ KNOWN_PEOPLE = [
 def detect_entities(text: str) -> dict:
     """
     Detect mentioned objects and people in the response text.
-    
+
     Returns:
-        {"objects": ["Нагатинская", ...], "people": ["Поляков", ...]}
+        {"objects": ["Остров-8", ...], "people": ["Поляков", ...]}
     """
     found_objects = []
     found_people = []
@@ -53,8 +66,9 @@ def build_inline_keyboard(text: str) -> Optional[InlineKeyboardMarkup]:
     """
     Build inline keyboard with entity links based on response text.
     Returns None if no entities detected.
-    
-    Buttons open Mini App cards for objects/users.
+
+    If there are more than 8 entities — don't show buttons (too many, clutters the chat).
+    If listing all objects — skip buttons (user already sees the full list).
     """
     entities = detect_entities(text)
     objects = entities["objects"]
@@ -63,10 +77,14 @@ def build_inline_keyboard(text: str) -> Optional[InlineKeyboardMarkup]:
     if not objects and not people:
         return None
 
+    # If too many objects mentioned (e.g. full list) — skip buttons
+    if len(objects) > 6:
+        return None
+
     buttons = []
 
-    # Add object buttons (max 3)
-    for obj in objects[:3]:
+    # Add object buttons (all found, up to 6)
+    for obj in objects[:6]:
         buttons.append(
             InlineKeyboardButton(
                 text=f"🏗 {obj}",
@@ -74,8 +92,8 @@ def build_inline_keyboard(text: str) -> Optional[InlineKeyboardMarkup]:
             )
         )
 
-    # Add people buttons (max 2)
-    for person in people[:2]:
+    # Add people buttons (up to 4)
+    for person in people[:4]:
         buttons.append(
             InlineKeyboardButton(
                 text=f"👤 {person}",
@@ -86,9 +104,9 @@ def build_inline_keyboard(text: str) -> Optional[InlineKeyboardMarkup]:
     if not buttons:
         return None
 
-    # Arrange buttons in rows (max 3 per row)
+    # Arrange buttons in rows (max 2 per row for readability)
     rows = []
-    for i in range(0, len(buttons), 3):
-        rows.append(buttons[i:i+3])
+    for i in range(0, len(buttons), 2):
+        rows.append(buttons[i:i+2])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
