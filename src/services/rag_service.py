@@ -117,5 +117,52 @@ class RAGService:
             return ""
 
 
+    def add_document(
+        self,
+        doc_id: str,
+        text: str,
+        metadata: dict,
+    ) -> bool:
+        """
+        Add a single document chunk to the knowledge base.
+
+        Args:
+            doc_id: unique document ID
+            text: document text content
+            metadata: metadata dict (source, title, category, agent)
+
+        Returns:
+            True if successful
+        """
+        collection = self._get_collection()
+        if collection is None:
+            # Try to create collection if it doesn't exist
+            try:
+                url = CHROMA_URL.replace("http://", "").replace("https://", "")
+                host, port = url.split(":")
+                self._client = chromadb.HttpClient(host=host, port=int(port))
+                self._collection = self._client.get_or_create_collection(COLLECTION_NAME)
+                collection = self._collection
+            except Exception as e:
+                logger.error(f"RAG: cannot create collection: {e}")
+                return False
+
+        embedding = self._get_embedding(text[:6000])  # Truncate for embedding
+        if embedding is None:
+            return False
+
+        try:
+            collection.upsert(
+                ids=[doc_id],
+                documents=[text],
+                embeddings=[embedding],
+                metadatas=[metadata],
+            )
+            return True
+        except Exception as e:
+            logger.error(f"RAG: add_document error: {e}")
+            return False
+
+
 # Singleton instance
 rag_service = RAGService()
