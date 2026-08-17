@@ -356,6 +356,48 @@ async def api_get_rag_documents(request: Request):
     return {"documents": []}
 
 
+@admin_router.get("/api/reports")
+async def api_get_reports(request: Request, session: AsyncSession = Depends(get_session)):
+    """Get daily reports with optional filters."""
+    if not check_auth(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from src.db.models import DailyReport
+    query = select(DailyReport).order_by(DailyReport.report_date.desc())
+
+    # Apply filters from query params
+    params = request.query_params
+    if params.get("project"):
+        query = query.where(DailyReport.project_name == params["project"])
+    if params.get("status"):
+        query = query.where(DailyReport.status == params["status"])
+    if params.get("date"):
+        from datetime import date as date_type
+        try:
+            filter_date = date_type.fromisoformat(params["date"])
+            query = query.where(DailyReport.report_date == filter_date)
+        except ValueError:
+            pass
+
+    result = await session.execute(query.limit(200))
+    reports = result.scalars().all()
+
+    return {"reports": [
+        {
+            "id": str(r.id),
+            "date": str(r.report_date) if r.report_date else "",
+            "project_name": r.project_name or "",
+            "author_name": r.author_name or "",
+            "work_done": r.work_done or "",
+            "problems": r.problems or "",
+            "workers_count": r.workers_count,
+            "status": r.status or "new",
+            "created_at": str(r.created_at) if r.created_at else "",
+        }
+        for r in reports
+    ]}
+
+
 @admin_router.get("/api/departments")
 async def api_get_departments(request: Request, session: AsyncSession = Depends(get_session)):
     """Get all departments."""
@@ -712,6 +754,7 @@ ADMIN_HTML = """<!DOCTYPE html>
         <a class="active" href="javascript:void(0)" onclick="showTab('users', this)"><span class="icon">👥</span>Сотрудники</a>
         <a href="javascript:void(0)" onclick="showTab('projects', this)"><span class="icon">🏗</span>Объекты</a>
         <a href="javascript:void(0)" onclick="showTab('departments', this)"><span class="icon">🏢</span>Отделы</a>
+        <a href="javascript:void(0)" onclick="showTab('reports', this)"><span class="icon">📋</span>Отчёты</a>
         <a href="javascript:void(0)" onclick="showTab('rag', this)"><span class="icon">📚</span>База знаний</a>
         <a href="javascript:void(0)" onclick="showTab('system', this)"><span class="icon">⚙️</span>Система</a>
         <a href="/dashboard"><span class="icon">📊</span>Дашборд</a>
@@ -772,6 +815,43 @@ ADMIN_HTML = """<!DOCTYPE html>
                     <thead><tr><th>Название</th></tr></thead>
                     <tbody id="departments-table">
                         <tr><td class="loading">Загрузка...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- REPORTS TAB -->
+        <div class="tab-content" id="tab-reports">
+            <div class="page-header">
+                <h1>📋 Отчёты со стройки</h1>
+            </div>
+            <div class="card" style="margin-bottom:16px;padding:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <select id="filter-project" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
+                    <option value="">Все объекты</option>
+                </select>
+                <select id="filter-status" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
+                    <option value="">Все статусы</option>
+                    <option value="new">Новый</option>
+                    <option value="reviewed">Просмотрен</option>
+                    <option value="flagged">Важный</option>
+                </select>
+                <input type="date" id="filter-date" style="padding:8px;border-radius:6px;border:1px solid #ddd;">
+                <button class="btn btn-primary btn-sm" onclick="loadReports()">🔍 Фильтр</button>
+            </div>
+            <div class="card">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="cursor:pointer" onclick="sortReports('date')">Дата ↕</th>
+                            <th style="cursor:pointer" onclick="sortReports('project')">Объект ↕</th>
+                            <th style="cursor:pointer" onclick="sortReports('author')">Автор ↕</th>
+                            <th>Работы</th>
+                            <th>Проблемы</th>
+                            <th>Статус</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reports-table">
+                        <tr><td colspan="6" class="loading">Загрузка...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -889,6 +969,7 @@ ADMIN_HTML = """<!DOCTYPE html>
             loadUsers();
             loadProjects();
             loadDepartments();
+            loadReports();
             loadRagDocuments();
         });
 
@@ -1028,6 +1109,84 @@ ADMIN_HTML = """<!DOCTYPE html>
             } catch(e) {
                 showToast('Ошибка сети', 'error');
             }
+        }
+
+        var allReports = [];
+        var reportsSortField = 'date';
+        var reportsSortDir = -1;
+
+        async function loadReports() {
+            try {
+                var project = document.getElementById('filter-project').value;
+                var status = document.getElementById('filter-status').value;
+                var date = document.getElementById('filter-date').value;
+                var url = '/admin/api/reports?';
+                if (project) url += 'project=' + encodeURIComponent(project) + '&';
+                if (status) url += 'status=' + status + '&';
+                if (date) url += 'date=' + date + '&';
+                var resp = await fetch(url);
+                if (resp.status === 401) { window.location.href = '/admin'; return; }
+                var data = await resp.json();
+                allReports = data.reports;
+                renderReports(allReports);
+                // Populate project filter
+                var filterSel = document.getElementById('filter-project');
+                if (filterSel.options.length <= 1) {
+                    var projects = [];
+                    allReports.forEach(function(r) {
+                        if (r.project_name && projects.indexOf(r.project_name) === -1) projects.push(r.project_name);
+                    });
+                    projects.sort();
+                    projects.forEach(function(p) {
+                        var opt = document.createElement('option');
+                        opt.value = p; opt.textContent = p;
+                        filterSel.appendChild(opt);
+                    });
+                }
+            } catch(e) {
+                document.getElementById('reports-table').innerHTML = '<tr><td colspan="6">Ошибка загрузки</td></tr>';
+            }
+        }
+
+        function sortReports(field) {
+            if (reportsSortField === field) {
+                reportsSortDir *= -1;
+            } else {
+                reportsSortField = field;
+                reportsSortDir = -1;
+            }
+            allReports.sort(function(a, b) {
+                var va = a[field] || '';
+                var vb = b[field] || '';
+                if (va < vb) return -1 * reportsSortDir;
+                if (va > vb) return 1 * reportsSortDir;
+                return 0;
+            });
+            renderReports(allReports);
+        }
+
+        function renderReports(reports) {
+            var tbody = document.getElementById('reports-table');
+            if (!reports.length) {
+                tbody.innerHTML = '<tr><td colspan="6">Нет отчётов</td></tr>';
+                return;
+            }
+            var html = '';
+            reports.forEach(function(r) {
+                var statusBadge = r.status === 'new' ? 'active' : (r.status === 'flagged' ? 'inactive' : 'active');
+                var statusLabel = r.status === 'new' ? '🆕 Новый' : (r.status === 'reviewed' ? '✅ Просмотрен' : '⚠️ Важный');
+                var workShort = (r.work_done || '').substring(0, 60) + ((r.work_done || '').length > 60 ? '...' : '');
+                var probShort = (r.problems || '-').substring(0, 40) + ((r.problems || '').length > 40 ? '...' : '');
+                html += '<tr>';
+                html += '<td>' + (r.date || '-') + '</td>';
+                html += '<td><b>' + (r.project_name || '-') + '</b></td>';
+                html += '<td>' + (r.author_name || '-') + '</td>';
+                html += '<td>' + workShort + '</td>';
+                html += '<td>' + (r.problems ? '<span style="color:#e74c3c">' + probShort + '</span>' : '-') + '</td>';
+                html += '<td><span class="badge badge-' + statusBadge + '">' + statusLabel + '</span></td>';
+                html += '</tr>';
+            });
+            tbody.innerHTML = html;
         }
 
         async function loadRagDocuments() {
@@ -1238,6 +1397,8 @@ ADMIN_HTML = """<!DOCTYPE html>
         window.loadUsers = loadUsers;
         window.loadProjects = loadProjects;
         window.loadDepartments = loadDepartments;
+        window.loadReports = loadReports;
+        window.sortReports = sortReports;
         window.loadRagDocuments = loadRagDocuments;
         window.openAddUser = openAddUser;
         window.editUser = editUser;

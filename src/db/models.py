@@ -264,3 +264,41 @@ class WorkCalendar(Base):
     __table_args__ = (
         Index("ix_calendar_date", "date"),
     )
+
+
+# ============================================================
+# 12. DAILY_REPORTS (ежедневные отчёты со стройки)
+# ============================================================
+class DailyReport(Base):
+    __tablename__ = "daily_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
+    project_name = Column(String(255), nullable=True)  # denormalized for quick display
+    author_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    author_name = Column(String(255), nullable=True)  # denormalized
+    telegram_user_id = Column(String, nullable=True)
+
+    # Report content
+    report_date = Column(Date, default=date.today)
+    workers_count = Column(Integer, nullable=True)
+    work_done = Column(Text, nullable=True)  # Выполненные работы
+    problems = Column(Text, nullable=True)  # Проблемы
+    materials_needed = Column(Text, nullable=True)  # Нужные материалы
+    notes = Column(Text, nullable=True)  # Примечания
+    weather = Column(String(100), nullable=True)
+
+    # Status
+    status = Column(String(20), default="new")  # new, reviewed, flagged
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_reports_date", "report_date"),
+        Index("ix_reports_project", "project_id"),
+    )
+
+    project = relationship("Project", foreign_keys=[project_id])
+    author = relationship("User", foreign_keys=[author_id])
