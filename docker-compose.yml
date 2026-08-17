@@ -99,6 +99,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./config:/app/config
+      - ./data:/app/data
       - telegram_bot_api_data:/var/lib/telegram-bot-api
 
   celery_worker:
