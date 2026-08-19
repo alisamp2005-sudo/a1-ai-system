@@ -7,11 +7,12 @@ import logging
 import uuid
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_session
 from src.db.models import Project, User, Department, UserDepartment
+from src.services.project_links import canonical_project_name
 
 logger = logging.getLogger(__name__)
 cards_router = APIRouter(prefix="/miniapp")
@@ -261,14 +262,16 @@ async def get_object_card(name: str, tg_id: str = "", session: AsyncSession = De
     import json as json_lib
     import os
 
-    # Search by name (case-insensitive)
+    # Resolve chat aliases and use an exact database match. The previous fuzzy
+    # query could select an unrelated first row when Telegram reused a Web App.
+    requested_name = canonical_project_name(name)
     result = await session.execute(
-        select(Project).where(Project.name.ilike(f"%{name}%"))
+        select(Project).where(func.lower(Project.name) == requested_name.casefold())
     )
-    project = result.scalar_one_or_none()
+    project = result.scalars().first()
 
     if not project:
-        return HTMLResponse(content=OBJECT_NOT_FOUND_HTML.format(name=name))
+        return HTMLResponse(content=OBJECT_NOT_FOUND_HTML.format(name=requested_name))
 
     status_map = {"active": "Активен", "completed": "Завершён", "paused": "Приостановлен"}
 

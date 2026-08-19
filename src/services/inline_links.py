@@ -7,6 +7,7 @@ import re
 import logging
 from typing import List, Optional
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from src.services.project_links import object_card_url
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ def build_inline_keyboard(text: str) -> Optional[InlineKeyboardMarkup]:
         buttons.append(
             InlineKeyboardButton(
                 text=f"🏗 {obj}",
-                web_app=WebAppInfo(url=f"{MINIAPP_BASE_URL}/object/{obj}")
+                web_app=WebAppInfo(url=object_card_url(obj))
             )
         )
 
