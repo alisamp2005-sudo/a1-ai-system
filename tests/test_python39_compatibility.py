@@ -13,7 +13,10 @@ TARGETS = [
 
 def run() -> None:
     for target in TARGETS:
-        ast.parse(target.read_text(encoding="utf-8"), filename=str(target), feature_version=(3, 9))
+        source = target.read_text(encoding="utf-8")
+        ast.parse(source, filename=str(target), feature_version=(3, 9))
+        if target.name == "import_employee_roster.py":
+            assert "ALTER COLUMN phone_number DROP NOT NULL" in source
     print("Python 3.9 compatibility checks passed")
 
 

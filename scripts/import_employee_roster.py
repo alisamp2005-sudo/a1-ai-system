@@ -81,6 +81,11 @@ async def upsert_roster() -> None:
         await connection.execute(text(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS job_title VARCHAR(255)"
         ))
+        # Phone numbers are not required for Telegram-only employee records.
+        # Older databases created before the current model may still enforce NOT NULL.
+        await connection.execute(text(
+            "ALTER TABLE users ALTER COLUMN phone_number DROP NOT NULL"
+        ))
 
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     created = updated = departments_created = links_created = project_links_created = 0
