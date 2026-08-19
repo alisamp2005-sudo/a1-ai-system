@@ -14,6 +14,8 @@ from src.services.router_agent import RouterAgent
 from src.services.inline_links import build_inline_keyboard
 from src.bot.document_delivery_handlers import can_access_documents
 from src.services.document_storage import build_delivery_keyboard, merge_keyboards
+from src.services.employee_identity import EmployeeIdentity
+from src.services.communication_style import format_reply, greeting_for
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -53,10 +55,10 @@ MAIN_MENU = ReplyKeyboardMarkup(
 # ================================================================
 
 @router.message(CommandStart())
-async def cmd_start(message: Message):
-    """Handle /start command."""
+async def cmd_start(message: Message, employee: EmployeeIdentity | None = None):
+    """Handle /start command with role-aware greeting."""
     await message.answer(
-        "👋 <b>Добро пожаловать в AI-систему А1!</b>\n\n"
+        greeting_for(employee) + "\n\n"
         "Я помогу вам с:\n"
         "• Вопросами по документам и регламентам\n"
         "• Анализом договоров\n"
@@ -195,7 +197,7 @@ async def cmd_status(message: Message):
 # ================================================================
 
 @router.message(F.text)
-async def handle_text_message(message: Message):
+async def handle_text_message(message: Message, employee: EmployeeIdentity | None = None):
     """Handle any text message — route to appropriate agent."""
     user_text = message.text
     user_id = str(message.from_user.id)
@@ -213,6 +215,8 @@ async def handle_text_message(message: Message):
             user_id=user_id,
             user_name=user_name,
         )
+
+        response = format_reply(response, employee)
 
         # Existing entity controls are preserved. Original-document controls are
         # added only for roles verified from the current Telegram account.
