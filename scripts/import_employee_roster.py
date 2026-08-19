@@ -12,6 +12,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -37,7 +38,7 @@ async def get_or_create_department(session: AsyncSession, name: str) -> Departme
     return department
 
 
-async def find_employee(session: AsyncSession, payload: dict) -> User | None:
+async def find_employee(session: AsyncSession, payload: dict) -> Optional[User]:
     telegram_id = payload.get("telegram_id")
     telegram_username = payload.get("telegram_username")
     full_name = payload["full_name"]
