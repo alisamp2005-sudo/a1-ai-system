@@ -64,6 +64,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
+    position: Optional[str] = None
     telegram_id: Optional[str] = None
     telegram_username: Optional[str] = None
     phone_number: Optional[str] = None
@@ -178,6 +179,7 @@ async def api_get_users(request: Request, session: AsyncSession = Depends(get_se
             "telegram_username": getattr(u, 'telegram_username', '') or "",
             "phone_number": u.phone_number or "",
             "role": u.role,
+            "job_title": getattr(u, 'job_title', '') or '',
             "department": dept_name,
             "is_active": u.is_active,
         })
@@ -199,6 +201,7 @@ async def api_create_user(data: UserCreate, request: Request, session: AsyncSess
         telegram_username=data.telegram_username if hasattr(data, 'telegram_username') and data.telegram_username else None,
         phone_number=phone,
         role=data.role,
+        job_title=data.position if data.position else None,
         is_active=True,
     )
     session.add(user)
@@ -240,6 +243,8 @@ async def api_update_user(user_id: str, data: UserUpdate, request: Request, sess
         user.phone_number = data.phone_number
     if data.role is not None:
         user.role = data.role
+    if hasattr(data, 'position') and data.position is not None:
+        user.job_title = data.position if data.position else None
     if data.is_active is not None:
         user.is_active = data.is_active
 
@@ -1040,6 +1045,10 @@ ADMIN_HTML = """<!DOCTYPE html>
                 <input type="text" id="user-tg-username" placeholder="@username (без @)">
             </div>
             <div class="form-group">
+                <label>Должность</label>
+                <input type="text" id="user-position" placeholder="Например: руководитель отдела снабжения">
+            </div>
+            <div class="form-group">
                 <label>Телефон</label>
                 <input type="text" id="user-phone" placeholder="+79001234567">
             </div>
@@ -1205,17 +1214,18 @@ ADMIN_HTML = """<!DOCTYPE html>
                 var safeTg = (u.telegram_id || '').replace(/"/g, '&quot;');
                 var safeTgUser = (u.telegram_username || '').replace(/"/g, '&quot;');
                 var safePhone = (u.phone_number || '').replace(/"/g, '&quot;');
+                var safeTitle = (u.job_title || '').replace(/"/g, '&quot;');
                 var tgDisplay = u.telegram_id || '';
                 if (u.telegram_username) tgDisplay += (tgDisplay ? ' / ' : '') + '@' + u.telegram_username;
                 if (!tgDisplay) tgDisplay = '-';
                 html += '<tr>';
-                html += '<td><b>' + u.full_name + '</b></td>';
+                html += '<td><b>' + u.full_name + '</b><br><small>' + (u.job_title || 'Должность не указана') + '</small></td>';
                 html += '<td><span class="badge badge-' + u.role + '">' + roleLabel(u.role) + '</span></td>';
                 html += '<td>' + (u.department || '-') + '</td>';
                 html += '<td>' + tgDisplay + '</td>';
                 html += '<td><span class="badge badge-' + (u.is_active ? 'active' : 'inactive') + '">' + (u.is_active ? 'Активен' : 'Неактивен') + '</span></td>';
                 html += '<td>';
-                html += '<button class="btn btn-primary btn-sm" data-action="edit" data-id="' + u.id + '" data-name="' + safeName + '" data-tg="' + safeTg + '" data-tguser="' + safeTgUser + '" data-phone="' + safePhone + '" data-role="' + u.role + '" data-dept="' + (u.department || '') + '">✏️</button> ';
+                html += '<button class="btn btn-primary btn-sm" data-action="edit" data-id="' + u.id + '" data-name="' + safeName + '" data-tg="' + safeTg + '" data-tguser="' + safeTgUser + '" data-phone="' + safePhone + '" data-position="' + safeTitle + '" data-role="' + u.role + '" data-dept="' + (u.department || '') + '">✏️</button> ';
                 html += '<button class="btn btn-danger btn-sm" data-action="deactivate" data-id="' + u.id + '" data-name="' + safeName + '">🗑</button>';
                 html += '</td>';
                 html += '</tr>';
@@ -1224,7 +1234,7 @@ ADMIN_HTML = """<!DOCTYPE html>
             // Attach event listeners
             tbody.querySelectorAll('[data-action="edit"]').forEach(function(btn) {
                 btn.addEventListener('click', function() {
-                    editUser(this.dataset.id, this.dataset.name, this.dataset.tg, this.dataset.tguser, this.dataset.phone, this.dataset.role, this.dataset.dept);
+                    editUser(this.dataset.id, this.dataset.name, this.dataset.tg, this.dataset.tguser, this.dataset.phone, this.dataset.role, this.dataset.dept, this.dataset.position);
                 });
             });
             tbody.querySelectorAll('[data-action="deactivate"]').forEach(function(btn) {
@@ -1493,19 +1503,21 @@ ADMIN_HTML = """<!DOCTYPE html>
             document.getElementById('user-name').value = '';
             document.getElementById('user-tg').value = '';
             document.getElementById('user-tg-username').value = '';
+            document.getElementById('user-position').value = '';
             document.getElementById('user-phone').value = '';
             document.getElementById('user-role').value = 'worker';
             document.getElementById('user-dept').value = '';
             document.getElementById('modal-user').classList.add('show');
         }
 
-        function editUser(id, name, tg, tgUser, phone, role, dept) {
+        function editUser(id, name, tg, tgUser, phone, role, dept, position) {
             document.getElementById('modal-user-title').textContent = 'Редактировать сотрудника';
             document.getElementById('edit-user-id').value = id;
             document.getElementById('user-name').value = name;
             document.getElementById('user-tg').value = (tg === '—' || tg === 'undefined') ? '' : tg;
             document.getElementById('user-tg-username').value = (tgUser === '—' || tgUser === 'undefined') ? '' : tgUser;
             document.getElementById('user-phone').value = (phone === '—' || phone === 'undefined') ? '' : phone;
+            document.getElementById('user-position').value = (position === '—' || position === 'undefined') ? '' : position;
             document.getElementById('user-role').value = role;
             document.getElementById('user-dept').value = (dept === '—' || dept === 'undefined') ? '' : dept;
             document.getElementById('modal-user').classList.add('show');
@@ -1527,6 +1539,7 @@ ADMIN_HTML = """<!DOCTYPE html>
             var tg = document.getElementById('user-tg').value.trim();
             var tgUsername = document.getElementById('user-tg-username').value.trim().replace('@', '');
             var phone = document.getElementById('user-phone').value.trim();
+            var position = document.getElementById('user-position').value.trim();
             var role = document.getElementById('user-role').value;
             var dept = document.getElementById('user-dept').value;
 
@@ -1542,6 +1555,7 @@ ADMIN_HTML = """<!DOCTYPE html>
                     telegram_id: tg || null,
                     telegram_username: tgUsername || null,
                     phone_number: phone || null,
+                    position: position || null,
                     role: role,
                     department_name: dept || null
                 });

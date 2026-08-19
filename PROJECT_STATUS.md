@@ -31,6 +31,9 @@
 - Whisper-сервис на хосте (порт 11436, faster-whisper, модель large-v3)
 - Память разговоров — Redis, последние 20 сообщений + сводка старых (summarization memory)
 - Seed DB: 5 пользователей, 7 отделов, 16 реальных объектов, 8 правил маршрутизации
+- Закрытый доступ Telegram-бота: только активные сотрудники из PostgreSQL получают рабочие функции; неизвестные аккаунты получают сообщение об отсутствии доступа
+- Импортируемый реестр `config/employee_roster.json`: 19 сотрудников, фактические должности, системные роли, отделы, категории отделов и первичные привязки к объектам
+- Для сотрудников, внесённых только по Telegram username, первый подтверждённый входящий аккаунт привязывается к постоянному Telegram ID
 
 ### Фаза 2 — AI-агенты
 - Secretary (project_management) — с методом process_question
@@ -99,7 +102,10 @@
 - `.env` (НЕ в git) — TELEGRAM_TOKEN, DB_PASS, ADMIN_TELEGRAM_ID, OLLAMA_URL
 
 ### Бот
-- `src/bot/main.py` — инициализация aiogram, регистрация роутеров, поддержка Local API
+- `src/bot/main.py` — инициализация aiogram, регистрация роутеров, поддержка Local API и employee-access middleware
+- `src/bot/access_middleware.py` — единая проверка доступа к обработчикам бота по активному реестру сотрудников
+- `src/services/employee_identity.py` — разрешение Telegram ID/username и первая безопасная привязка ID по предварительно внесённому username
+- `scripts/import_employee_roster.py` — идемпотентный импорт утверждённого реестра сотрудников, отделов и привязок к объектам
 - `src/bot/handlers.py` — основной обработчик текста, фото, голосовых; inline-кнопки
 - `src/bot/document_handlers.py` — загрузка файлов в RAG через бота
 - `src/bot/task_handlers.py` — /newtask, /mytasks, /digest, /users

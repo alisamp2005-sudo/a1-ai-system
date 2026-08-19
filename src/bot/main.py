@@ -18,6 +18,7 @@ from src.bot.task_handlers import task_router
 from src.bot.approval_handlers import approval_router
 from src.bot.document_handlers import document_router
 from src.bot.document_delivery_handlers import document_delivery_router
+from src.bot.access_middleware import EmployeeAccessMiddleware
 from src.utils.config import settings
 
 logging.basicConfig(
@@ -49,6 +50,12 @@ async def main():
         session=session,
     )
     dp = Dispatcher()
+
+    # Closed employee access applies to every message and inline callback before
+    # individual business handlers, document uploads, or Mini App reports run.
+    access_middleware = EmployeeAccessMiddleware()
+    dp.message.outer_middleware(access_middleware)
+    dp.callback_query.outer_middleware(access_middleware)
 
     # Register handlers
     dp.include_router(approval_router)

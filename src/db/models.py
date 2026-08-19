@@ -29,7 +29,8 @@ class User(Base):
     telegram_username = Column(String(255), nullable=True)  # @username without @
     phone_number = Column(String(20), nullable=True)  # E.164 format
     full_name = Column(String(255), nullable=False)
-    role = Column(String(50), nullable=False)  # admin, top_manager, manager, worker
+    job_title = Column(String(255), nullable=True)  # фактическая должность сотрудника
+    role = Column(String(50), nullable=False)  # системные права: admin, top_manager, manager, worker
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

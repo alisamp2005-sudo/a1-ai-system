@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "description": "Согласованный реестр сотрудников для первичного импорта. Роли — права доступа системы; должность — фактическая должность сотрудника.",
+  "departments": [
+    "Руководство",
+    "Технический заказчик",
+    "Коммерческий отдел",
+    "Инженерная служба",
+    "Проектное управление",
+    "Снабжение",
+    "Юридический отдел",
+    "Сметный отдел",
+    "ПТО",
+    "Фасадное направление",
+    "Служба ТБ",
+    "АХО"
+  ],
+  "department_categories": {
+    "АХО": ["офис и эксплуатация", "пропуска и доступ", "хоззакупки", "транспорт", "инвентарь", "заявки на ремонт"],
+    "Снабжение": ["заявки ТМЦ", "коммерческие предложения", "поставщики", "цены и сроки", "заказы", "приемка материалов"],
+    "ПТО": ["исполнительная документация", "КС-2 и КС-3", "объемы работ", "графики", "технические запросы", "сдача работ"],
+    "Сметный отдел": ["сметы", "калькуляции", "проверка расценок", "лимиты", "изменение стоимости"],
+    "Юридический отдел": ["договоры", "дополнительные соглашения", "претензии", "правовые заключения"],
+    "Служба ТБ": ["инструктажи", "нарушения ТБ", "СИЗ", "допуски", "расследования"],
+    "Проектное управление": ["статус объекта", "проблемы объекта", "координация подрядчиков", "план работ"]
+  },
+  "employees": [
+    {
+      "full_name": "Загир Алимович Тагиров",
+      "telegram_id": "266883889",
+      "telegram_username": null,
+      "job_title": "Генеральный директор",
+      "role": "top_manager",
+      "department": "Руководство",
+      "projects": []
+    },
+    {
+      "full_name": "Анжелика Зиновьева",
+      "legacy_full_names": ["Зиновьева А."],
+      "telegram_id": null,
+      "telegram_username": "AngeLika_Zinovieva",
+      "job_title": "Помощник генерального директора",
+      "role": "top_manager",
+      "department": "Руководство",
+      "projects": []
+    },
+    {
+      "full_name": "Александр Лыков",
+      "telegram_id": null,
+      "telegram_username": "Aleksandr_Lyk",
+      "job_title": "Главный инженер",
+      "role": "top_manager",
+      "department": "Инженерная служба",
+      "projects": []
+    },
+    {
+      "full_name": "Завада Александр Иванович",
+      "telegram_id": "786377753",
+      "telegram_username": null,
+      "job_title": "Руководитель службы технического заказчика",
+      "role": "manager",
+      "department": "Технический заказчик",
+      "projects": []
+    },
+    {
+      "full_name": "Светлана Сергеевна",
+      "telegram_id": null,
+      "telegram_username": "SvetOshka29",
+      "job_title": "Коммерческий директор",
+      "role": "manager",
+      "department": "Коммерческий отдел",
+      "projects": []
+    },
+    {
+      "full_name": "Лыков Максим Александрович",
+      "legacy_full_names": ["Лыков М.А."],
+      "telegram_id": "7720986932",
+      "telegram_username": null,
+      "job_title": "Заместитель генерального директора",
+      "role": "top_manager",
+      "department": "Руководство",
+      "projects": []
+    },
+    {
+      "full_name": "Рашид Албаков",
+      "telegram_id": "197199697",
+      "telegram_username": null,
+      "job_title": "Руководитель проекта",
+      "role": "manager",
+      "department": "Проектное управление",
+      "projects": ["Остров-8"]
+    },
+    {
+      "full_name": "Соболь Владислав Эдуардович",
+      "telegram_id": "680924404",
+      "telegram_username": null,
+      "job_title": "Руководитель отдела снабжения",
+      "role": "manager",
+      "department": "Снабжение",
+      "projects": []
+    },
+    {
+      "full_name": "Евдокимова Екатерина Александровна",
+      "telegram_id": "864494283",
+      "telegram_username": null,
+      "job_title": "Руководитель юридического отдела",
+      "role": "manager",
+      "department": "Юридический отдел",
+      "projects": []
+    },
+    {
+      "full_name": "Ходыкина Елена Степановна",
+      "telegram_id": null,
+      "telegram_username": "pgslen4ik",
+      "job_title": "Руководитель сметного отдела",
+      "role": "manager",
+      "department": "Сметный отдел",
+      "projects": []
+    },
+    {
+      "full_name": "Полина",
+      "telegram_id": "223375763",
+      "telegram_username": null,
+      "job_title": "Руководитель отдела ПТО",
+      "role": "manager",
+      "department": "ПТО",
+      "projects": []
+    },
+    {
+      "full_name": "Талипов Руслан Наильевич",
+      "telegram_id": null,
+      "telegram_username": "RNTalipov",
+      "job_title": "Руководитель фасадного направления",
+      "role": "manager",
+      "department": "Фасадное направление",
+      "projects": []
+    },
+    {
+      "full_name": "Щукин Вячеслав",
+      "telegram_id": "5567816176",
+      "telegram_username": null,
+      "job_title": "Заместитель главного инженера",
+      "role": "manager",
+      "department": "Инженерная служба",
+      "projects": ["ППК ВСК (Ульяновск, Поливно)"]
+    },
+    {
+      "full_name": "Алимурадов Дмитрий",
+      "telegram_id": null,
+      "telegram_username": "ADZ1986",
+      "job_title": "Заместитель главного инженера",
+      "role": "manager",
+      "department": "Инженерная служба",
+      "projects": ["Ленская 15"]
+    },
+    {
+      "full_name": "Поляков Сергей Борисович",
+      "legacy_full_names": ["Поляков С.Б."],
+      "telegram_id": "5294732130",
+      "telegram_username": null,
+      "job_title": "Руководитель службы охраны труда",
+      "role": "manager",
+      "department": "Служба ТБ",
+      "projects": []
+    },
+    {
+      "full_name": "Павел Смирнов",
+      "telegram_id": "425909304",
+      "telegram_username": null,
+      "job_title": "Главный инженер проекта",
+      "role": "manager",
+      "department": "Инженерная служба",
+      "projects": []
+    },
+    {
+      "full_name": "Шестопалов Денис Александрович",
+      "telegram_id": null,
+      "telegram_username": "Denis_Shestopalov12",
+      "job_title": "Заместитель руководителя проекта по инженерным сетям",
+      "role": "manager",
+      "department": "Проектное управление",
+      "projects": ["Остров-8"]
+    },
+    {
+      "full_name": "Андрей Безбородов",
+      "telegram_id": null,
+      "telegram_username": "Bezborodov_Andrey",
+      "job_title": "Руководитель проекта",
+      "role": "manager",
+      "department": "Проектное управление",
+      "projects": []
+    },
+    {
+      "full_name": "Курашова Виктория Михайловна",
+      "telegram_id": null,
+      "telegram_username": "Viktoriya_Kyrashova",
+      "job_title": "Руководитель отдела АХО",
+      "role": "manager",
+      "department": "АХО",
+      "projects": []
+    }
+  ]
+}
