@@ -396,7 +396,9 @@ async def api_upload_document(request: Request):
 
     duplicate = next(
         (item for item in registry.get("documents", [])
-         if item.get("content_hash") == content_hash),
+         if item.get("content_hash") == content_hash
+         and item.get("storage_path")
+         and os.path.isfile(item.get("storage_path"))),
         None,
     )
     if duplicate:
@@ -441,7 +443,7 @@ async def api_upload_document(request: Request):
 
         # Register in the document registry loaded before text extraction.
         from datetime import datetime
-        registry["documents"].append({
+        record = {
             "document_id": content_hash,
             "filename": file.filename,
             "title": title,
@@ -456,7 +458,13 @@ async def api_upload_document(request: Request):
             "source": "admin",
             "loaded_at": datetime.now().isoformat(),
             "loaded_by": "Админ",
-        })
+        }
+        for existing in registry["documents"]:
+            if existing.get("content_hash") == content_hash:
+                existing.update(record)
+                break
+        else:
+            registry["documents"].append(record)
 
         os.makedirs(os.path.dirname(registry_path), exist_ok=True)
         with open(registry_path, "w") as f:

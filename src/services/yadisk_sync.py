@@ -60,7 +60,7 @@ def _register_document(filename: str, title: str, category: str, content_hash: s
     except Exception:
         registry = {"documents": []}
 
-    registry["documents"].append({
+    record = {
         "document_id": content_hash,
         "filename": filename,
         "title": title,
@@ -73,7 +73,13 @@ def _register_document(filename: str, title: str, category: str, content_hash: s
         "source": source,
         "loaded_at": datetime.now().isoformat(),
         "loaded_by": "Яндекс.Диск (авто)",
-    })
+    }
+    for existing in registry["documents"]:
+        if existing.get("content_hash") == content_hash:
+            existing.update(record)
+            break
+    else:
+        registry["documents"].append(record)
 
     with open(DOCUMENT_REGISTRY_PATH, "w") as f:
         json.dump(registry, f, ensure_ascii=False, indent=2)
@@ -82,6 +88,24 @@ def _register_document(filename: str, title: str, category: str, content_hash: s
 def _get_file_hash(content: bytes) -> str:
     """Get SHA256 hash of file content."""
     return hashlib.sha256(content).hexdigest()[:16]
+
+
+def _has_saved_original(content_hash: str) -> bool:
+    """Return whether the main registry still has the original file on disk."""
+    try:
+        if not os.path.exists(DOCUMENT_REGISTRY_PATH):
+            return False
+        with open(DOCUMENT_REGISTRY_PATH, "r") as file:
+            documents = json.load(file).get("documents", [])
+        for document in documents:
+            if document.get("content_hash") != content_hash:
+                continue
+            storage_path = document.get("storage_path", "")
+            if storage_path and os.path.isfile(storage_path):
+                return True
+    except Exception as exc:
+        logger.warning("Unable to check original-document backfill state: %s", exc)
+    return False
 
 
 def _map_folder_to_project(folder_name: str) -> str:
@@ -231,9 +255,12 @@ async def sync_yadisk():
                 # Check if already synced (by path + modified date)
                 sync_key = f"{item_name}/{file_name}"
                 if sync_key in synced_files:
-                    if synced_files[sync_key].get("modified") == file_modified:
+                    previous = synced_files[sync_key]
+                    if previous.get("modified") == file_modified and _has_saved_original(previous.get("content_hash", "")):
                         stats["skipped"] += 1
                         continue
+                    if previous.get("modified") == file_modified:
+                        logger.info("  Backfilling original file: %s", file_name)
 
                 # Download and process
                 logger.info(f"  Downloading: {file_name} ({file_size} bytes)")
@@ -244,11 +271,13 @@ async def sync_yadisk():
                     stats["errors"] += 1
                     continue
 
-                # Check hash for duplicates
+                # A duplicate is skipped only when the existing registry entry
+                # still retains an original file. Older text-only entries must be
+                # backfilled so they can be delivered to authorized users.
                 file_hash = _get_file_hash(content)
                 if any(d.get("content_hash") == file_hash for d in
                        _load_sync_registry().get("synced_files", {}).values()
-                       if isinstance(d, dict)):
+                       if isinstance(d, dict)) and _has_saved_original(file_hash):
                     stats["skipped"] += 1
                     continue
 
@@ -330,9 +359,12 @@ async def sync_yadisk():
             sync_key = file_name
             file_modified = item.get("modified", "")
             if sync_key in synced_files:
-                if synced_files[sync_key].get("modified") == file_modified:
+                previous = synced_files[sync_key]
+                if previous.get("modified") == file_modified and _has_saved_original(previous.get("content_hash", "")):
                     stats["skipped"] += 1
                     continue
+                if previous.get("modified") == file_modified:
+                    logger.info("Backfilling original file: %s", file_name)
 
             logger.info(f"Downloading top-level: {file_name}")
             file_dl_path = item.get("path", f"/{file_name}")

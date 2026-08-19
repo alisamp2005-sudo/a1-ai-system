@@ -60,12 +60,12 @@ def _get_content_hash(text: str) -> str:
 
 
 def _check_duplicate(filename: str, content_hash: str) -> Optional[dict]:
-    """Check if document is already loaded. Returns existing entry or None."""
+    """Return only a duplicate that already retains a deliverable original file."""
     registry = _load_registry()
     for doc in registry["documents"]:
-        if doc.get("content_hash") == content_hash:
-            return doc
-        if doc.get("filename") == filename:
+        same_document = doc.get("content_hash") == content_hash or doc.get("filename") == filename
+        storage_path = doc.get("storage_path", "")
+        if same_document and storage_path and os.path.isfile(storage_path):
             return doc
     return None
 
@@ -82,7 +82,7 @@ def _register_document(
 ):
     """Register a loaded document, including the preserved original for delivery."""
     registry = _load_registry()
-    registry["documents"].append({
+    record = {
         "document_id": file_hash,
         "filename": filename,
         "title": title,
@@ -94,7 +94,13 @@ def _register_document(
         "source": "telegram",
         "loaded_at": datetime.now().isoformat(),
         "loaded_by": user,
-    })
+    }
+    for existing in registry["documents"]:
+        if existing.get("content_hash") == file_hash:
+            existing.update(record)
+            break
+    else:
+        registry["documents"].append(record)
     _save_registry(registry)
 
 logger = logging.getLogger(__name__)
